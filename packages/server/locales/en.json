@@ -1018,5 +1018,6 @@
 	"Please select at least one item": "Please select at least one item",
 	"Only include rows where this formula is true. ": "Only include rows where this formula is true. ",
 	"Use %s to access current user ID": "Use %s to access current user ID",
-	"Action not found": "Action not found"
+	"Action not found": "Action not found",
+	"Development settings": "Development settings"
 }
