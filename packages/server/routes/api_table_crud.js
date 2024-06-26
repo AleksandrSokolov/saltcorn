@@ -1,7 +1,13 @@
 /**
- * API handler
- * 
- * 
+ * Table Data API handler
+ * Allows to manipulate with saltcorn tables data.
+ *
+ * Attention! Currently, you cannot insert / update users table via this api
+ * because users table has specific meaning in SC and
+ * not all required (mandatory) fields of user available via this api.
+ * For now this is platform limitation.
+ * To solve this in future needs to publish sc_role table into user tables of saltcorn.
+ *
  * Documentation: https://wiki.saltcorn.com/view/ShowPage?title=API
  * @category server
  * @module routes/api
@@ -9,7 +15,9 @@
  */
 /** @type {module:express-promise-router} */
 const Router = require("express-promise-router");
+//const db = require("@saltcorn/data/db");
 const { error_catcher } = require("./utils.js");
+//const { mkTable, renderForm, link, post_btn } = require("@saltcorn/markup");
 const { getState } = require("@saltcorn/data/db/state");
 const {
   prepare_update_row,
@@ -17,7 +25,9 @@ const {
 } = require("@saltcorn/data/web-mobile-commons");
 const Table = require("@saltcorn/data/models/table");
 const View = require("@saltcorn/data/models/view");
+//const Field = require("@saltcorn/data/models/field");
 const Trigger = require("@saltcorn/data/models/trigger");
+//const load_plugins = require("../load_plugins");
 const passport = require("passport");
 
 const {
@@ -27,6 +37,13 @@ const {
 } = require("@saltcorn/data/plugin-helper");
 const Crash = require("@saltcorn/data/models/crash");
 
+/**
+ * @type {object}
+ * @const
+ * @namespace apiRouter
+ * @category server
+ * @subcategory routes
+ */
 const router = new Router();
 module.exports = router;
 
@@ -91,138 +108,6 @@ function accessAllowedWrite(req, user, table) {
       (table.ownership_field_id || table.ownership_formula))
   );
 }
-/**
- * Check that user has right to trigger call
- * @param {object} req httprequest
- * @param {object} user user based on access token
- * @param {Trigger} trigger
- * @returns {boolean}
- */
-function accessAllowed(req, user, trigger) {
-  const role =
-    req.user && req.user.id
-      ? req.user.role_id
-      : user && user.role_id
-      ? user.role_id
-      : 100;
-
-  return role <= trigger.min_role;
-}
-
-const getFlashes = (req) =>
-  ["error", "success", "danger", "warning", "information"]
-    .map((type) => {
-      return { type, msg: req.flash(type) };
-    })
-    .filter((a) => a.msg && a.msg.length && a.msg.length > 0);
-/**
- * Post viewQuery
- */
-router.post(
-  "/viewQuery/:viewName/:queryName",
-  error_catcher(async (req, res, next) => {
-    let { viewName, queryName } = req.params;
-    const view = await View.findOne({ name: viewName });
-    const db = require("@saltcorn/data/db");
-    if (!view) {
-      getState().log(3, `API viewQuery ${viewName} not found`);
-      res.status(404).json({
-        error: req.__("View %s not found", viewName),
-        view: viewName,
-        queryName: queryName,
-        smr: req.smr,
-        smrHeader: req.headers["x-saltcorn-client"],
-        schema: db.getTenantSchema(),
-        userTenant: req.user?.tenant,
-      });
-      return;
-    }
-    await passport.authenticate(
-      "jwt",
-      { session: false },
-      async function (err, user, info) {
-        const role = user && user.id ? user.role_id : 100;
-        if (
-          role <= view.min_role ||
-          (await view.authorise_get({ req, ...view })) // TODO set query to state
-        ) {
-          const queries = view.queries(false, req);
-          if (Object.prototype.hasOwnProperty.call(queries, queryName)) {
-            const { args } = req.body;
-            const resp = await queries[queryName](...args, true);
-            res.json({ success: resp, alerts: getFlashes(req) });
-          } else {
-            getState().log(
-              3,
-              `API viewQuery ${view.name} ${queryName} not found`
-            );
-            res.status(404).json({
-              error: req.__("Query %s not found", queryName),
-              view: viewName,
-              queryName: queryName,
-              smr: req.smr,
-              smrHeader: req.headers["x-saltcorn-client"],
-              schema: db.getTenantSchema(),
-              userTenant: req.user?.tenant,
-            });
-          }
-        } else {
-          getState().log(3, `API viewQuery ${view.name} not authorized`);
-          res.status(401).json({ error: req.__("Not authorized") });
-        }
-      }
-    )(req, res, next);
-  })
-);
-/**
- *
- */
-router.get(
-  "/:tableName/distinct/:fieldName",
-  //passport.authenticate("api-bearer", { session: false }),
-  error_catcher(async (req, res, next) => {
-    let { tableName, fieldName } = req.params;
-    const table = Table.findOne(
-      strictParseInt(tableName)
-        ? { id: strictParseInt(tableName) }
-        : { name: tableName }
-    );
-    if (!table) {
-      res.status(404).json({ error: req.__("Not found") });
-      return;
-    }
-
-    await passport.authenticate(
-      "api-bearer",
-      { session: false },
-      async function (err, user, info) {
-        if (accessAllowedRead(req, user, table)) {
-          const field = table.getFields().find((f) => f.name === fieldName);
-          if (!field) {
-            res.status(404).json({ error: req.__("Not found") });
-            return;
-          }
-          let dvs;
-          if (
-            field.is_fkey ||
-            (field.type.name === "String" && field.attributes?.options)
-          ) {
-            dvs = await field.distinct_values();
-          } else {
-            dvs = await table.distinctValues(fieldName);
-          }
-          res.json({ success: dvs });
-        } else {
-          getState().log(
-            3,
-            `API distinct ${table.name}.${fieldName} not authorized`
-          );
-          res.status(401).json({ error: req.__("Not authorized") });
-        }
-      }
-    )(req, res, next);
-  })
-);
 
 /**
  * Select Table rows using GET
@@ -239,7 +124,7 @@ router.get(
 
     const { fields, versioncount, approximate, dereference, ...req_query } =
       req.query;
-
+      
     const table = Table.findOne(
       strictParseInt(tableName)
         ? { id: strictParseInt(tableName) }
@@ -313,71 +198,6 @@ router.get(
 );
 
 /**
- * Call Action (Trigger) using POST
- * Attention! if you have table with name "action" it can be problem in future
- * @name post/action/:actionname/
- * @function
- * @memberof module:routes/api~apiRouter
- */
-router.all(
-  "/action/:actionname/",
-  error_catcher(async (req, res, next) => {
-    const { actionname } = req.params;
-    // todo protect action by authorization check
-    // todo we need protection from hackers
-    // todo add to trigger role that can call it
-    // todo include role public - anyone can call it
-
-    const trigger = await Trigger.findOne({
-      name: actionname,
-      when_trigger: "API call",
-    });
-
-    if (!trigger) {
-      getState().log(3, `API action ${actionname} not found`);
-      res.status(404).json({ error: req.__("Not found") });
-      return;
-    }
-    await passport.authenticate(
-      "api-bearer",
-      { session: false },
-      async function (err, user, info) {
-        if (accessAllowed(req, user, trigger)) {
-          try {
-            const action = getState().actions[trigger.action];
-            const row = req.method === "GET" ? req.query : req.body;
-            const resp = await action.run({
-              configuration: trigger.configuration,
-              body: req.body,
-              row,
-              req,
-              user: user || req.user,
-            });
-            if (
-              (row._process_result || req.headers?.scprocessresults) &&
-              resp?.goto
-            )
-              res.redirect(resp.goto);
-            else if (req.headers?.scgotourl)
-              res.redirect(req.headers?.scgotourl);
-            else {
-              if (trigger.configuration?._raw_output) res.json({ resp });
-              else res.json({ success: true, data: resp });
-            }
-          } catch (e) {
-            Crash.create(e, req);
-            res.status(400).json({ success: false, error: e.message });
-          }
-        } else {
-          getState().log(3, `API action ${actionname} not authorized`);
-          res.status(401).json({ error: req.__("Not authorized") });
-        }
-      }
-    )(req, res, next);
-  })
-);
-
-/**
  * Insert into Table using POST
  * @name post/:tableName/
  * @function
@@ -403,10 +223,7 @@ router.post(
           readState(row, fields, req);
           const errors = await prepare_insert_row(row, fields);
           if (errors.length > 0) {
-            getState().log(
-              2,
-              `API POST ${table.name} error: ${errors.join(", ")}`
-            );
+            getState().log(2, `API POST ${table.name} error: ${errors.join(", ")}` );
             res.status(400).json({ error: errors.join(", ") });
             return;
           }
