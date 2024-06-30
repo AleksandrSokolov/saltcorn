@@ -15,19 +15,14 @@
  */
 /** @type {module:express-promise-router} */
 const Router = require("express-promise-router");
-//const db = require("@saltcorn/data/db");
+// const expressValidator = require('express-validator');
 const { error_catcher } = require("./utils.js");
-//const { mkTable, renderForm, link, post_btn } = require("@saltcorn/markup");
 const { getState } = require("@saltcorn/data/db/state");
 const {
   prepare_update_row,
   prepare_insert_row,
 } = require("@saltcorn/data/web-mobile-commons");
 const Table = require("@saltcorn/data/models/table");
-const View = require("@saltcorn/data/models/view");
-//const Field = require("@saltcorn/data/models/field");
-const Trigger = require("@saltcorn/data/models/trigger");
-//const load_plugins = require("../load_plugins");
 const passport = require("passport");
 
 const {
@@ -48,6 +43,7 @@ const router = new Router();
 module.exports = router;
 
 /**
+ * Limit fields 
  * @param {*} fields
  * @returns {*}
  */
@@ -108,6 +104,57 @@ function accessAllowedWrite(req, user, table) {
       (table.ownership_field_id || table.ownership_formula))
   );
 }
+/**
+ * 
+ * @param {*} value 
+ * @param {*} min 
+ * @param {*} max 
+ * @returns 
+ */
+function isInRange(value, min, max) {
+  //if (isNaN(value)) return false;
+  if (value < min || value >= max) {
+    return false;
+  }
+  return true;
+}
+/**
+ * 
+ * @param {*} value 
+ * @returns 
+ */
+function validateNumber(value) {
+
+  if (typeof value !== 'number') {
+    return false; //throw new TypeError('Value is not a number');
+  }
+
+  if (!Number.isSafeInteger(value)) {
+    return false; //throw new RangeError('Value is outside the valid range for an integer');
+  }
+  return true;
+}
+/**
+ * 
+ * @param {*} value 
+ * @param {*} min 
+ * @returns 
+ */
+function validateNumberMin(value, min) {
+
+  if (typeof value !== 'number') {
+    // return false; //throw new TypeError('Value is not a number');
+    value = strictParseInt(value);
+  }
+
+  if (!Number.isSafeInteger(value)) {
+    return false; //throw new RangeError('Value is outside the valid range for an integer');
+  }
+  if (value < min) return false;
+  return true;
+}
+
+
 
 /**
  * Select Table rows using GET
@@ -122,8 +169,24 @@ router.get(
   error_catcher(async (req, res, next) => {
     let { tableName } = req.params;
 
-    const { fields, versioncount, approximate, dereference, ...req_query } =
+    const { fields, limit, offset, versioncount, approximate, dereference, ...req_query } =
       req.query;
+    if(limit&&offset&&versioncount === "on"){
+      getState().log(3, `API get ${tableName} Cannot use versioncount and limit with offset simultaneously`);
+      return res.status(400).send({ error: 'Cannot use versioncount and limit with offset simultaneously' });
+    }
+    if(typeof limit !== 'undefined')
+    if (isNaN(limit)||(!validateNumberMin(limit, 1))) {
+      getState().log(3, `API get ${tableName} Invalid limit parameter`);
+      return res.status(400).send({ error: 'Invalid limit parameter' });
+    }
+    if(typeof offset !== 'undefined')
+    if (isNaN(offset)||(!validateNumberMin(offset, 1))) {
+      getState().log(3, `API get ${tableName} Invalid offset parameter`);
+      return res.status(400).send({ error: 'Invalid offset parameter' });
+    }
+    
+    
       
     const table = Table.findOne(
       strictParseInt(tableName)
@@ -185,9 +248,12 @@ router.get(
               joinFields,
               forPublic: !(req.user || user),
               forUser: req.user || user,
+              limit: limit,
+              offset: offset
             });
           }
-          res.json({ success: rows.map(limitFields(fields)) });
+          console.log( { success: rows.map(limitFields(fields)), count: rows.length })
+          res.json({ success: rows.map(limitFields(fields)), count: rows.length });
         } else {
           getState().log(3, `API get ${table.name} not authorized`);
           res.status(401).json({ error: req.__("Not authorized") });
@@ -196,6 +262,66 @@ router.get(
     )(req, res, next);
   })
 );
+/**
+ * Select Table row using GET and record id or /count
+ * @name get/:tableName/:id
+ * @function
+ * @memberof module:routes/api~apiRouter
+ */
+router.get(
+  "/:tableName/:resourceId",
+  error_catcher(async (req, res, next) => {
+    let { tableName, resourceId } = req.params;
+
+    if (isNaN(resourceId)||!isInRange(resourceId, 1, 2147483647)) {
+      getState().log(3, `API get ${tableName} Invalid resource ID`);
+      return res.status(400).send({ error: 'Invalid resource ID' });
+    }
+  
+
+    const { fields, ...req_query } =
+      req.query;
+      
+    const table = Table.findOne(
+      strictParseInt(tableName)
+        ? { id: strictParseInt(tableName) }
+        : { name: tableName }
+    );
+    if (!table) {
+      getState().log(3, `API get ${tableName} table not found`);
+      res.status(404).json({ error: req.__("Not found") });
+      return;
+    }
+
+    await passport.authenticate(
+      ["api-bearer", "jwt"],
+      { session: false },
+      async function (err, user, info) {
+        if (accessAllowedRead(req, user, table, true)) {
+          let rows
+            const tbl_fields = table.getFields();
+            readState(req_query, tbl_fields, req);
+            rows = await table.getRow(
+              {id:resourceId},
+              {
+                forPublic: !(req.user || user),
+                forUser: req.user || user,
+              }
+            );
+
+          res.json({ 
+            success: [rows].map(limitFields(fields)),
+            count: [rows].length
+           });
+        } else {
+          getState().log(3, `API get ${table.name} not authorized`);
+          res.status(401).json({ error: req.__("Not authorized") });
+        }
+      }
+    )(req, res, next);
+  })
+);
+
 
 /**
  * Insert into Table using POST
@@ -234,7 +360,10 @@ router.post(
           if (ins_res.error) {
             getState().log(2, `API POST ${table.name} error: ${ins_res.error}`);
             res.status(400).json(ins_res);
-          } else res.json(ins_res);
+          } else { // correct answer 201 for create REST API resource 
+            res.status(201).json(ins_res);
+          }
+
         } else {
           getState().log(3, `API POST ${table.name} not authorized`);
           res.status(401).json({ error: req.__("Not authorized") });
@@ -298,6 +427,61 @@ router.post(
 );
 
 /**
+ * Update Table row directed by ID using PUT
+ * POST api/<table>/id
+ * @name put/:tableName/:id
+ * @function
+ * @memberof module:routes/api~apiRouter
+ */
+router.put(
+  "/:tableName/:id",
+  error_catcher(async (req, res, next) => {
+    const { tableName, id } = req.params;
+    const table = Table.findOne({ name: tableName });
+    if (!table) {
+      getState().log(3, `API POST ${tableName} not found`);
+      res.status(404).json({ error: req.__("Not found") });
+      return;
+    }
+    await passport.authenticate(
+      ["api-bearer", "jwt"],
+      { session: false },
+      async function (err, user, info) {
+        if (accessAllowedWrite(req, user, table)) {
+          const { _versions, ...row } = req.body;
+          const fields = table.getFields();
+          readState(row, fields, req);
+          const errors = await prepare_update_row(table, row, id);
+          if (errors.length > 0) {
+            getState().log(
+              2,
+              `API POST ${table.name} error: ${errors.join(", ")}`
+            );
+            res.status(400).json({ error: errors.join(", ") });
+            return;
+          }
+          const ins_res = await table.tryUpdateRow(
+            row,
+            id,
+            user || req.user || { role_id: 100 }
+          );
+
+          if (ins_res.error) {
+            getState().log(2, `API POST ${table.name} error: ${ins_res.error}`);
+            res.status(400).json(ins_res);
+          } else {
+            res.json(ins_res);
+          }
+        } else {
+          getState().log(3, `API POST ${table.name} not authorized`);
+          res.status(401).json({ error: req.__("Not authorized") });
+        }
+      }
+    )(req, res, next);
+  })
+);
+
+/**
  * Delete Table row by ID using DELETE
  * @name delete/:tableName/:id
  * @function
@@ -334,7 +518,7 @@ router.delete(
                 { id },
                 user || req.user || { role_id: 100 }
               );
-            res.json({ success: true });
+            res.status(200).json({ success: true });
           } catch (e) {
             getState().log(2, `API DELETE ${table.name} error: ${e.message}`);
             res.status(400).json({ error: e.message });

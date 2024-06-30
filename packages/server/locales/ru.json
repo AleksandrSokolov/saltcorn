@@ -1131,5 +1131,6 @@
 	"Sync information tracks the last modification or deletion timestamp so that the table data can be synchronized with the mobile app": "Информация синхронизации отслеживает временную метку последнего изменения или удаления, чтобы данные таблицы могли быть синхронизированы с мобильным приложением",
 	"Do not pick or compare time": "Игнорировать время",
 	"The current theme has no user specific settings": "Текущая тема не имеет настроек, специфичных для пользователя",
-	"Create trigger": "Create trigger"
+	"Create trigger": "Create trigger",
+	"Models": "Models"
 }
