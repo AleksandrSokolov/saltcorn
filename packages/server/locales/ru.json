@@ -1132,5 +1132,17 @@
 	"Do not pick or compare time": "Игнорировать время",
 	"The current theme has no user specific settings": "Текущая тема не имеет настроек, специфичных для пользователя",
 	"Create trigger": "Create trigger",
-	"Models": "Models"
+	"Models": "Models",
+	"Destination page group": "Destination page group",
+	"Show if formula": "Show if formula",
+	"Show link or embed if true, don't show if false. Based on state variables from URL query string and <code>user</code>. For the full state use <code>row</code>. Example: <code>!!row.createlink</code> to show link if and only if state has <code>createlink</code>.": "Show link or embed if true, don't show if false. Based on state variables from URL query string and <code>user</code>. For the full state use <code>row</code>. Example: <code>!!row.createlink</code> to show link if and only if state has <code>createlink</code>.",
+	"The view name is part of the URL when it is shown alone.": "The view name is part of the URL when it is shown alone.",
+	"Some view patterns accept interpolations. Ex: <code>{{ name }}</code> or <code>{{ row ? `Edit ${row.name}` : `New person` }}</code>": "Some view patterns accept interpolations. Ex: <code>{{ name }}</code> or <code>{{ row ? `Edit ${row.name}` : `New person` }}</code>",
+	"Page description": "Page description",
+	"For search engines. Some view patterns accept interpolations.": "For search engines. Some view patterns accept interpolations.",
+	"No menu": "No menu",
+	"Omit the menu from this view": "Omit the menu from this view",
+	"Popup width": "Popup width",
+	"Popup min width": "Popup min width",
+	"Show an icon in the title bar to indicate when form data is being saved": "Show an icon in the title bar to indicate when form data is being saved"
 }
