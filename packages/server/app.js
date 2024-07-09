@@ -45,6 +45,7 @@ const cors = require("cors");
 const api = require("./routes/api");
 const scapi = require("./routes/scapi");
 const restapi_tables = require("./routes/restapi_tables");
+const api_tables_ddl = require("./routes/restapi_tables_ddl");
 
 const locales = Object.keys(available_languages);
 // i18n configuration

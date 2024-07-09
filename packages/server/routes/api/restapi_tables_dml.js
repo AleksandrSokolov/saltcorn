@@ -16,7 +16,7 @@
 /** @type {module:express-promise-router} */
 const Router = require("express-promise-router");
 // const expressValidator = require('express-validator');
-const { error_catcher } = require("./utils.js");
+const { error_catcher } = require("../utils.js");
 const { getState } = require("@saltcorn/data/db/state");
 const {
   prepare_update_row,
