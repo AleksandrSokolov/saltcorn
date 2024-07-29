@@ -152,7 +152,7 @@ router.delete(
     await passport.authenticate("api-bearer", { session: false }, async function (err, user, info) {
       if (accessAllowedWrite(req, user)) {
         //const table = await Table.findByIdAndRemove(req.params.id);
-        const table = await Table.findOne(req.params.id);
+        const table = Table.findOne(req.params.id);
         if (!table) {
           return res.status(404).json({ error: req.__("Table not found") });
         }

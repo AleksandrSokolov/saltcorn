@@ -44,8 +44,8 @@ const ExtractJwt = require("passport-jwt").ExtractJwt;
 const cors = require("cors");
 const api = require("./routes/api");
 const scapi = require("./routes/scapi");
-const restapi_tables = require("./routes/restapi_tables");
-const api_tables_ddl = require("./routes/restapi_tables_ddl");
+const restapi_tables_dml = require("./routes/api/restapi_tables_dml");
+const restapi_tables_ddl = require("./routes/api/restapi_tables_ddl");
 
 const locales = Object.keys(available_languages);
 // i18n configuration
@@ -355,8 +355,8 @@ const getApp = async (opts = {}) => {
 
   app.use("/api", api);
   app.use("/scapi", scapi);
-  app.use("/restapi/tables", restapi_tables);
-  
+  app.use("/scapi2/tables", restapi_tables_ddl);
+  app.use("/restapi/tables", restapi_tables_dml);
 
   const csurf = csrf();
   let noCsrf = null;
