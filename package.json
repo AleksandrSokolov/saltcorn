@@ -4,7 +4,7 @@
   "devDependencies": {
     "jest": "^29.7.0",
     "minipass": "3.1.6",
-    "supertest": "^6.3.3",
+    "supertest": "7.0.0",
     "typedoc": "^0.24.8",
     "typescript": "^4.4.4"
   },
@@ -47,7 +47,8 @@
       "*.test.js",
       "packages/filemanager/public/build/bundle.js",
       "packages/saltcorn-builder/**",
-      "docs/**"
+      "docs/**",
+      "deploy/"
     ],
     "extends": "eslint:recommended",
     "parserOptions": {

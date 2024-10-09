@@ -1103,15 +1103,20 @@ router.post(
       res.redirect("/auth/twofa/login/totp");
       return;
     }
+    let maxAge = null;
     if (req.session.cookie)
       if (req.body.remember) {
-        const setDur = +getState().getConfig("cookie_duration_remember", 0);
-        if (setDur) req.session.cookie.maxAge = setDur * 60 * 60 * 1000;
-        else req.session.cookie.expires = false;
+        const setDur = +getState().getConfig("cookie_duration_remember", 720);
+        if (setDur) {
+          maxAge = setDur * 60 * 60 * 1000;
+          req.session.cookie.maxAge = maxAge;
+        } else req.session.cookie.expires = false;
       } else {
-        const setDur = +getState().getConfig("cookie_duration", 0);
-        if (setDur) req.session.cookie.maxAge = setDur * 60 * 60 * 1000;
-        else req.session.cookie.expires = false;
+        const setDur = +getState().getConfig("cookie_duration", 720);
+        if (setDur) {
+          maxAge = setDur * 60 * 60 * 1000;
+          req.session.cookie.maxAge = maxAge;
+        } else req.session.cookie.expires = false;
       }
     const session_id = getSessionId(req);
 
@@ -1119,7 +1124,7 @@ router.post(
       session_id,
       old_session_id: req.old_session_id,
     });
-    res?.cookie?.("loggedin", "true");
+    res?.cookie?.("loggedin", "true", maxAge ? { maxAge } : undefined);
     req.flash("success", req.__("Welcome, %s!", req.user.email));
     if (req.smr) {
       const dbUser = await User.findOne({ id: req.user.id });
@@ -1155,7 +1160,11 @@ router.get(
     } else {
       const auth = getState().auth_methods[method];
       if (auth) {
-        passport.authenticate(method, auth.parameters)(req, res, next);
+        const passportParams =
+          typeof auth.parameters === "function"
+            ? auth.parameters(req)
+            : auth.parameters;
+        passport.authenticate(method, passportParams)(req, res, next);
       } else {
         req.flash(
           "danger",
@@ -1189,7 +1198,11 @@ router.post(
     const { method } = req.params;
     const auth = getState().auth_methods[method];
     if (auth) {
-      passport.authenticate(method, auth.parameters)(
+      const passportParams =
+        typeof auth.parameters === "function"
+          ? auth.parameters(req)
+          : auth.parameters;
+      passport.authenticate(method, passportParams)(
         req,
         res,
         loginCallback(req, res)
@@ -1227,7 +1240,12 @@ const callbackFn = async (req, res, next) => {
   const { method } = req.params;
   const auth = getState().auth_methods[method];
   if (auth) {
-    passport.authenticate(method, { failureRedirect: "/auth/login" })(
+    const passportParams =
+      typeof auth.parameters === "function"
+        ? auth.parameters(req)
+        : auth.parameters;
+    passportParams.failureRedirect = "/auth/login";
+    passport.authenticate(method, passportParams)(
       req,
       res,
       loginCallback(req, res)

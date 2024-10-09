@@ -139,7 +139,14 @@ const formRowWrap = (
           div(
             {
               class: [
-                isHoriz(fStyle) && labelCols && `col-sm-${labelCols} text-end`,
+                hdr.type?.name === "Bool" &&
+                  isHoriz(fStyle) &&
+                  labelCols &&
+                  `col-${labelCols} text-end`,
+                hdr.type?.name !== "Bool" &&
+                  isHoriz(fStyle) &&
+                  labelCols &&
+                  `col-sm-${labelCols} text-md-end`,
                 labelCols === 0 && "d-none",
               ],
             },
@@ -152,7 +159,16 @@ const formRowWrap = (
             hdr.help && !hdr.sublabel ? helpLink(hdr.help) : ""
           ),
           div(
-            { class: isHoriz(fStyle) && `col-sm-${12 - labelCols}` },
+            {
+              class: [
+                hdr.type?.name === "Bool" &&
+                  isHoriz(fStyle) &&
+                  `col-${12 - labelCols}`,
+                hdr.type?.name !== "Bool" &&
+                  isHoriz(fStyle) &&
+                  `col-sm-${12 - labelCols}`,
+              ],
+            },
             inner,
             text(error),
             mkSubLabelAndHelp(hdr)
@@ -521,6 +537,78 @@ const innerField =
             time_24hr: true,
             timeFormat: 'H:i'
           });`)
+          )
+        );
+      case "time_of_week":
+        const tow_val = v[hdr.form_name];
+        let tow_d, tow_h, tow_m;
+        if (tow_val) {
+          [tow_d, tow_h, tow_m] = tow_val.split(" ");
+        }
+        return (
+          `<input type="hidden" name="${text_attr(name)}" id="inputh${text_attr(
+            name
+          )}" data-fieldname="${text_attr(hdr.form_name)}" value="${text_attr(
+            tow_val
+          )}"><div class="d-flex"><select class="form-control form-select" id="input${text_attr(
+            name
+          )}__day" onchange="update_time_of_week('${text_attr(name)}')(this)">
+             <option ${tow_d === "Monday" ? "selected" : ""}>Monday</option>
+             <option ${tow_d === "Tuesday" ? "selected" : ""}>Tuesday</option>
+             <option ${
+               tow_d === "Wednesday" ? "selected" : ""
+             }>Wednesday</option>
+             <option ${tow_d === "Thursday" ? "selected" : ""}>Thursday</option>
+             <option ${tow_d === "Friday" ? "selected" : ""}>Friday</option>
+             <option ${tow_d === "Saturday" ? "selected" : ""}>Saturday</option>
+             <option ${tow_d === "Sunday" ? "selected" : ""}>Sunday</option>
+             </select>
+             <input class="form-control ${validClass} ${
+            hdr.class || ""
+          }"${maybe_disabled} id="input${text_attr(
+            name
+          )}__time" type="text" placeholder="Select time of day.." ${
+            tow_h && tow_m ? `value="${tow_h}:${tow_m}" ` : 'value="12:00" '
+          }readonly="readonly"></div>` +
+          script(
+            domReady(`$('#input${text_attr(name)}__time').flatpickr({
+            noCalendar: true,
+            enableTime: true,
+            time_24hr: true,
+            timeFormat: 'H:i',
+            onChange: update_time_of_week('${text_attr(name)}')
+          });`)
+          )
+        );
+      case "date":
+        return (
+          `<input class="form-control ${validClass} ${
+            hdr.class || ""
+          }"${maybe_disabled} data-fieldname="${text_attr(
+            hdr.form_name
+          )}" name="${text_attr(name)}" id="input${text_attr(
+            name
+          )}" type="text" placeholder="Select date.." readonly="readonly" value="${text_attr(
+            v[hdr.form_name]
+          )}">` +
+          script(
+            domReady(`$('#input${text_attr(name)}').flatpickr({              
+              enableTime: true,
+              dateFormat: "Z",
+              time_24hr: true,
+              altFormat: "Y-m-d H:i",
+              altInput: true,
+              ${
+                hdr.attributes.minDate
+                  ? `minDate: new Date("${hdr.attributes.minDate.toISOString()}"),`
+                  : ""
+              }
+              ${
+                hdr.attributes.maxDate
+                  ? `maxDate: new Date("${hdr.attributes.maxDate.toISOString()}"),`
+                  : ""
+              }
+            });`)
           )
         );
       case "file":
@@ -899,7 +987,12 @@ const mkFormRowForField =
     const errorFeedback = errors[name]
       ? `<div class="invalid-feedback">${text(errors[name])}</div>`
       : "";
-    if (hdr.input_type === "hidden") {
+    if (hdr.input_type === "hidden" && hdr.showIf) {
+      return span(
+        { "data-show-if": mkShowIf(hdr.showIf) },
+        innerField(v, errors, nameAdd)(hdr)
+      );
+    } else if (hdr.input_type === "hidden") {
       return innerField(v, errors, nameAdd)(hdr);
     } else
       return formRowWrap(
@@ -1121,7 +1214,6 @@ const renderFormLayout = (form: Form): string => {
         field.attributes = { ...field.attributes, ...segment.configuration };
         if (segment.onchange_action)
           field.attributes.onChange = `view_post(this, 'run_action', {onchange_action: '${segment.onchange_action}', onchange_field:'${field.name}',  ...get_form_record(this) })`;
-        // TODO ch: get it more generic, split up editQuery
         field.attributes.isMobile = !isNode || form.req?.smr;
         return (
           innerField(

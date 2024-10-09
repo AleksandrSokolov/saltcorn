@@ -190,7 +190,8 @@ function pjax_to(href, e) {
         initialize_page();
       },
       error: function (res) {
-        notifyAlert({ type: "danger", text: res.responseText });
+        if (!checkNetworkError(res))
+          notifyAlert({ type: "danger", text: res.responseText });
       },
     });
   }
@@ -224,8 +225,10 @@ function ajax_done(res, viewname) {
 function spin_action_link(e) {
   const $e = $(e);
   const width = $e.width();
+  const height = $e.height();
+
   $e.attr("data-innerhtml-prespin", $e.html());
-  $e.html('<i class="fas fa-spinner fa-spin"></i>').width(width);
+  $e.html('<i class="fas fa-spinner fa-spin"></i>').width(width).height(height);
 }
 
 function reset_spinners() {
@@ -264,7 +267,8 @@ function view_post(viewnameOrElem, route, data, onDone, sendState) {
       reset_spinners();
     })
     .fail(function (res) {
-      notifyAlert({ type: "danger", text: res.responseText });
+      if (!checkNetworkError(res))
+        notifyAlert({ type: "danger", text: res.responseText });
       reset_spinners();
     });
 }
@@ -388,8 +392,11 @@ function ajax_modal(url, opts = {}) {
       ? {
           error: opts.onError,
         }
-      : {}),
+      : { error: checkNetworkError }),
   });
+}
+function closeModal() {
+  $("#scmodal").modal("toggle");
 }
 
 function selectVersionError(res, btnId) {
@@ -448,7 +455,8 @@ function saveAndContinue(e, k, event) {
     },
     error: function (request) {
       var ct = request.getResponseHeader("content-type") || "";
-      if (ct.startsWith && ct.startsWith("application/json")) {
+      if (checkNetworkError(request)) {
+      } else if (ct.startsWith && ct.startsWith("application/json")) {
         notifyAlert({ type: "danger", text: request.responseJSON.error });
       } else {
         $("#page-inner-content").html(request.responseText);
@@ -497,6 +505,7 @@ function applyViewConfig(e, url, k, event) {
     },
     data: JSON.stringify(cfg),
     error: function (request) {
+      checkNetworkError(request);
       window.savingViewConfig = false;
       ajax_indicate_error(e, request);
     },
@@ -575,6 +584,7 @@ function ajaxSubmitForm(e, force_no_reload) {
       else common_done(res, form.attr("data-viewname"));
     },
     error: function (request) {
+      checkNetworkError(request);
       var title = request.getResponseHeader("Page-Title");
       if (title) $("#scmodal .modal-title").html(decodeURIComponent(title));
       var body = request.responseText;
@@ -591,6 +601,9 @@ function ajax_post_json(url, data, args = {}) {
     ...args,
   });
 }
+
+let scNetworkErrorSignaled = false;
+
 function ajax_post(url, args) {
   $.ajax(url, {
     type: "POST",
@@ -600,10 +613,31 @@ function ajax_post(url, args) {
     ...(args || {}),
   })
     .done(ajax_done)
-    .fail((e) =>
-      ajax_done(e.responseJSON || { error: "Unknown error: " + e.responseText })
-    );
+    .fail((e, ...more) => {
+      if (!checkNetworkError(e))
+        return ajax_done(
+          e.responseJSON || { error: "Unknown error: " + e.responseText }
+        );
+    });
 }
+
+function checkNetworkError(e) {
+  if (e.readyState == 0 && !e.responseText && !e.responseJSON) {
+    //network error
+    if (scNetworkErrorSignaled) return true;
+    scNetworkErrorSignaled = true;
+    setTimeout(() => {
+      scNetworkErrorSignaled = false;
+    }, 1000);
+    console.error("Network error", e);
+    notifyAlert({
+      type: "danger",
+      text: "Network connection error",
+    });
+    return true;
+  }
+}
+
 function ajax_post_btn(e, reload_on_done, reload_delay) {
   var form = $(e).closest("form");
   var url = form.attr("action");
@@ -617,6 +651,7 @@ function ajax_post_btn(e, reload_on_done, reload_delay) {
     success: function () {
       if (reload_on_done) location.reload();
     },
+    error: checkNetworkError,
     complete: function () {
       if (reload_delay)
         setTimeout(function () {
@@ -638,6 +673,7 @@ function api_action_call(name, body) {
     success: function (res) {
       common_done(res.data);
     },
+    error: checkNetworkError,
   });
 }
 
@@ -837,7 +873,7 @@ function build_mobile_app(button) {
 
   if (
     params.useDocker &&
-    !cordovaBuilderAvailable &&
+    !window.cordovaBuilderAvailable &&
     !confirm(
       "Docker is selected but the Cordova builder seems not to be installed. " +
         "Do you really want to continue?"
@@ -845,6 +881,21 @@ function build_mobile_app(button) {
   ) {
     return;
   }
+
+  const notSupportedPlugins = params.includedPlugins.filter(
+    (plugin) => !window.pluginsReadyForMobile.includes(plugin)
+  );
+  if (
+    notSupportedPlugins.length > 0 &&
+    !confirm(
+      `It seems that the plugins '${notSupportedPlugins.join(
+        ", "
+      )}' are not ready for mobile. Do you really want to continue?`
+    )
+  ) {
+    return;
+  }
+
   ajax_post("/admin/build-mobile-app", {
     data: params,
     success: (data) => {
@@ -916,8 +967,8 @@ function check_cordova_builder() {
   $.ajax("/admin/mobile-app/check-cordova-builder", {
     type: "GET",
     success: function (res) {
-      cordovaBuilderAvailable = !!res.installed;
-      if (cordovaBuilderAvailable) {
+      window.cordovaBuilderAvailable = !!res.installed;
+      if (window.cordovaBuilderAvailable) {
         $("#dockerBuilderStatusId").html(
           `<span>
             installed<i class="ps-2 fas fa-check text-success"></i>
@@ -1011,7 +1062,7 @@ function toggle_tbl_sync() {
 function toggle_android_platform() {
   if ($("#androidCheckboxId")[0].checked === true) {
     $("#dockerCheckboxId").attr("hidden", false);
-    $("#dockerCheckboxId").attr("checked", cordovaBuilderAvailable);
+    $("#dockerCheckboxId").attr("checked", window.cordovaBuilderAvailable);
     $("#dockerLabelId").removeClass("d-none");
   } else {
     $("#dockerCheckboxId").attr("hidden", true);
@@ -1032,6 +1083,84 @@ function join_field_clicked(e, fieldPath) {
 
 function execLink(path) {
   window.location.href = `${location.origin}${path}`;
+}
+
+let defferedPrompt;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  defferedPrompt = e;
+});
+
+function isAndroidMobile() {
+  const ua = navigator.userAgent || navigator.vendor || window.opera;
+  return /android/i.test(ua) && /mobile/i.test(ua);
+}
+
+function validatePWAManifest(manifest) {
+  const errors = [];
+  if (!manifest) errors.push("The manifest.json file is missing. ");
+  else {
+    if (!manifest.icons || manifest.icons.length === 0)
+      errors.push("At least one icon is required");
+    else if (
+      manifest.icons.length > 0 &&
+      !manifest.icons.some((icon) => {
+        const sizes = icon.sizes.split("x");
+        const x = parseInt(sizes[0]);
+        const y = parseInt(sizes[1]);
+        return x === y && x >= 144;
+      })
+    ) {
+      errors.push(
+        "At least one square icon of size 144x144 or larger is required"
+      );
+    }
+    if (isAndroidMobile() && manifest.display === "browser") {
+      errors.push(
+        "The display property 'browser' may not work on mobile devices"
+      );
+    }
+  }
+  return errors;
+}
+
+function supportsBeforeInstallPrompt() {
+  return "onbeforeinstallprompt" in window;
+}
+
+function installPWA() {
+  if (defferedPrompt) defferedPrompt.prompt();
+  else if (!supportsBeforeInstallPrompt()) {
+    notifyAlert({
+      type: "danger",
+      text:
+        "It looks like your browser doesn’t support this feature. " +
+        "Please try the standard installation method provided by your browser, or switch to a different browser.",
+    });
+  } else {
+    const manifestUrl = `${window.location.origin}/notifications/manifest.json`;
+    notifyAlert({
+      type: "danger",
+      text:
+        "Unable to install the app. " +
+        "Please check if the app is already installed or " +
+        `inspect your manifest.json <a href="${manifestUrl}?pretty=true" target="_blank">here</a>`,
+    });
+    $.ajax(manifestUrl, {
+      success: (res) => {
+        const errors = validatePWAManifest(res);
+        if (errors.length > 0)
+          notifyAlert({
+            type: "warning",
+            text: `${errors.join(", ")}`,
+          });
+      },
+      error: (res) => {
+        console.log("Error fetching manifest.json");
+        console.log(res);
+      },
+    });
+  }
 }
 
 (() => {

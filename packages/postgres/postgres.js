@@ -7,7 +7,9 @@
 const { Pool } = require("pg");
 const copyStreams = require("pg-copy-streams");
 const { promisify } = require("util");
-const { pipeline } = require("stream");
+const { pipeline } = require("stream/promises");
+const { Transform } = require("stream");
+const replace = require("replacestream");
 const {
   sqlsanitize,
   mkWhere,
@@ -62,7 +64,7 @@ const close = async () => {
  * @param {object} [connObj = {}] - connection object
  * @returns {Promise<void>}
  */
-const changeConnection = async (connObj = {}) => {
+const changeConnection = async (connObj = Object.create(null)) => {
   await close();
   pool = new Pool(getConnectObject(connObj));
 };
@@ -91,7 +93,7 @@ const rollback = async () => {
  * @param {object} [selectopts = {}] - select options
  * @returns {Promise<*>} return rows
  */
-const select = async (tbl, whereObj, selectopts = {}) => {
+const select = async (tbl, whereObj, selectopts = Object.create(null)) => {
   const { where, values } = mkWhere(whereObj);
   const schema = selectopts.schema || getTenantSchema();
   const sql = `SELECT ${
@@ -165,7 +167,7 @@ const getVersion = async (short) => {
  * @param {object} [opts = {}]
  * @returns {Promise<object[]>} result of delete execution
  */
-const deleteWhere = async (tbl, whereObj, opts = {}) => {
+const deleteWhere = async (tbl, whereObj, opts = Object.create(null)) => {
   const { where, values } = mkWhere(whereObj);
   const sql = `delete FROM "${getTenantSchema()}"."${sqlsanitize(
     tbl
@@ -184,7 +186,7 @@ const deleteWhere = async (tbl, whereObj, opts = {}) => {
  * @param {object} [opts = {}] - columns attributes
  * @returns {Promise<string>} returns primary key column or Id column value. If primary key column is not defined then return value of Id column.
  */
-const insert = async (tbl, obj, opts = {}) => {
+const insert = async (tbl, obj, opts = Object.create(null)) => {
   const kvs = Object.entries(obj);
   const fnameList = kvs.map(([k, v]) => `"${sqlsanitize(k)}"`).join();
   var valPosList = [];
@@ -229,7 +231,7 @@ const insert = async (tbl, obj, opts = {}) => {
  * @param {object} [opts = {}] - columns attributes
  * @returns {Promise<void>} no result
  */
-const update = async (tbl, obj, id, opts = {}) => {
+const update = async (tbl, obj, id, opts = Object.create(null)) => {
   const kvs = Object.entries(obj);
   if (kvs.length === 0) return;
   const assigns = kvs
@@ -254,7 +256,7 @@ const update = async (tbl, obj, id, opts = {}) => {
  * @param {object} opts - can contain a db client for transactions
  * @returns {Promise<void>} no result
  */
-const updateWhere = async (tbl, obj, whereObj, opts = {}) => {
+const updateWhere = async (tbl, obj, whereObj, opts = Object.create(null)) => {
   const kvs = Object.entries(obj);
   if (kvs.length === 0) return;
   const { where, values } = mkWhere(whereObj, false, kvs.length);
@@ -278,7 +280,7 @@ const updateWhere = async (tbl, obj, whereObj, opts = {}) => {
  * @returns {Promise<object>} return first record from sql result
  * @throws {Error}
  */
-const selectOne = async (tbl, where, selectopts = {}) => {
+const selectOne = async (tbl, where, selectopts = Object.create(null)) => {
   const rows = await select(tbl, where, { ...selectopts, limit: 1 });
   if (rows.length === 0) {
     const w = mkWhere(where);
@@ -293,7 +295,7 @@ const selectOne = async (tbl, where, selectopts = {}) => {
  * @param {object} [selectopts = {}] - select options
  * @returns {Promise<null|object>} - null if no record or first record data
  */
-const selectMaybeOne = async (tbl, where, selectopts = {}) => {
+const selectMaybeOne = async (tbl, where, selectopts = Object.create(null)) => {
   const rows = await select(tbl, where, { ...selectopts, limit: 1 });
   if (rows.length === 0) return null;
   else return rows[0];
@@ -397,40 +399,9 @@ const drop_index = async (table_name, field_name) => {
  * @param {string} tableName - table name
  * @param {string[]} fieldNames - list of columns
  * @param {object} client - db connection
- * @returns {Promise<function>} new Promise
- */
-const copyFrom1 = (fileStream, tableName, fieldNames, client) => {
-  // TBD describe difference between CopyFrom and CopyFrom1
-  //  1. No tenant support
-  //  2. Manual promisification.
-  //  3. ???
-  //  4. Not exported nor used anywhere
-  const quote = (s) => `"${s}"`;
-  const sql = `COPY "${sqlsanitize(tableName)}" (${fieldNames
-    .map(quote)
-    .join(",")}) FROM STDIN CSV HEADER`;
-  sql_log(sql);
-
-  var stream = client.query(copyStreams.from(sql));
-
-  return new Promise((resolve, reject) => {
-    fileStream.on("error", reject);
-    stream.on("error", reject);
-    stream.on("finish", resolve);
-    fileStream.pipe(stream).on("error", reject);
-  });
-};
-/**
- * Copy data from CSV to table?
- * Only for PG
- * @param {object} fileStream - file stream
- * @param {string} tableName - table name
- * @param {string[]} fieldNames - list of columns
- * @param {object} client - db connection
  * @returns {Promise<void>} no results
  */
 const copyFrom = async (fileStream, tableName, fieldNames, client) => {
-  // TBD describe difference between CopyFrom and CopyFrom1
   const quote = (s) => `"${s}"`;
   const sql = `COPY "${getTenantSchema()}"."${sqlsanitize(
     tableName
@@ -438,7 +409,16 @@ const copyFrom = async (fileStream, tableName, fieldNames, client) => {
   sql_log(sql);
 
   const stream = client.query(copyStreams.from(sql));
-  return await promisify(pipeline)(fileStream, stream);
+  return await pipeline(fileStream, stream);
+};
+
+const copyToJson = async (fileStream, tableName, client) => {
+  const sql = `COPY (SELECT (row_to_json("${sqlsanitize(tableName)}".*) || ',')
+  FROM "${getTenantSchema()}"."${sqlsanitize(tableName)}") TO STDOUT`;
+  sql_log(sql);
+  const stream = (client || pool).query(copyStreams.to(sql));
+
+  return await pipeline(stream, replace("\\\\", "\\"), fileStream);
 };
 
 const slugify = (s) =>
@@ -529,6 +509,7 @@ const postgresExports = {
   reset_sequence,
   getVersion,
   copyFrom,
+  copyToJson,
   slugify,
   time,
   listTables,

@@ -2081,12 +2081,18 @@ const stateFieldsToWhere = ({ fields, state, approximate = true, table }) => {
       }
     }
   });
-  orFields.forEach((orField) => {
-    if (typeof qstate[orField] === "undefined") return;
-    if (!qstate.or) qstate.or = [];
-    qstate.or.push({ [orField]: qstate[orField] });
-    delete qstate[orField];
-  });
+  if (orFields.length === 1) {
+    const orKey = orFields[0];
+    const orVal = qstate[orKey];
+    delete qstate[orKey];
+    return { or: [{ [orKey]: orVal }, qstate] };
+  } else
+    orFields.forEach((orField) => {
+      if (typeof qstate[orField] === "undefined") return;
+      if (!qstate.or) qstate.or = [];
+      qstate.or.push({ [orField]: qstate[orField] });
+      delete qstate[orField];
+    });
 
   return qstate;
 };
@@ -2327,7 +2333,13 @@ const json_list_to_external_table = (get_json_list, fields0) => {
       (x) =>
       ([k, v]) => {
         if (Array.isArray(v)) return v.every((v1) => sat(x)([k, v1]));
+        else if (k === "_fts")
+          return JSON.stringify(x)
+            .toLowerCase()
+            .includes((v.searchTerm || "").toLowerCase());
+        else if (v?.lt && v?.equal) return x[k] <= +v.lt;
         else if (v?.lt) return x[k] < +v.lt;
+        else if (v?.gt && v?.equal) return x[k] >= +v.gt;
         else if (v?.gt) return x[k] > +v.gt;
         else if (v?.ilike) return (x[k] || "").includes(v.ilike);
         else return x[k] == v;

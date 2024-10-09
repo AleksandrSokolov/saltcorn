@@ -514,3 +514,79 @@ ul.katetree {
 ul.katetree details ul {
   list-style-type: none;
 }
+
+pre.monospace-block {
+  font-family: monospace;
+  color: unset;
+  background: unset;
+  padding: unset;
+  border-radius: unset;
+}
+
+.d-none-prefer {
+  display: none;
+}
+
+button.monospace-copy-btn:has(+ pre.monospace-block:hover) {
+  display: block !important ;
+}
+button.monospace-copy-btn:hover {
+  display: block !important ;
+}
+button.monospace-copy-btn {
+  position: absolute;
+}
+
+#page-inner-content.sbadmin2-theme .table.table-card-rows {
+  border-spacing: 0px 8px;
+  border-collapse: separate;
+}
+#page-inner-content.sbadmin2-theme .table.table-card-rows tbody {
+  transform: translateY(8px);
+}
+#page-inner-content.sbadmin2-theme .table.table-card-rows tr {
+  border-radius: 6px;
+}
+#page-inner-content.sbadmin2-theme
+  .table-hover.table-card-rows
+  > tbody
+  > tr:hover
+  > * {
+  --tblr-table-bg-state: transparent !important;
+  --bs-table-accent-bg: transparent !important;
+  color: var(--bs-table-hover-color);
+  background-color: var(--bs-table-hover-bg);
+}
+#page-inner-content.sbadmin2-theme .table.table-card-rows thead th {
+  background-color: #eaecf4;
+  border-block: 1px solid #d3d3d3 !important;
+  padding: 18px 15px;
+  font-weight: 600;
+}
+#page-inner-content.sbadmin2-theme .table.table-card-rows thead th:first-child {
+  border-left: 1px solid #d3d3d3 !important;
+  border-radius: 6px 0 0 6px;
+}
+#page-inner-content.sbadmin2-theme .table.table-card-rows thead th:last-child {
+  border-right: 1px #d3d3d3 !important;
+  border-radius: 0 6px 6px 0;
+}
+#page-inner-content.sbadmin2-theme .table.table-card-rows tbody td {
+  border-block: 1px solid #e3e6f0 !important;
+  position: relative;
+  z-index: 11;
+  padding: 15px 15px;
+  background-color: #fff;
+}
+#page-inner-content.sbadmin2-theme .table.table-card-rows tbody td:first-child {
+  border-left: 1px solid #e3e6f0 !important;
+  border-radius: 6px 0 0 6px;
+}
+#page-inner-content.sbadmin2-theme .table.table-card-rows tbody td:last-child {
+  border-right: 1px #e3e6f0 !important;
+  border-radius: 0 6px 6px 0;
+}
+
+.custom-file-label {
+  margin-left: 10px;
+}

@@ -186,7 +186,11 @@ const viewForm = async (req, tableOptions, roles, pages, values) => {
         sublabel: req.__("Display data from this table"),
         options: tableOptions,
         disabled: isEdit,
-        showIf: { viewtemplate: hasTable },
+        showIf: isEdit
+          ? hasTable.includes(values.viewtemplate)
+            ? undefined
+            : { nosuchvar: true }
+          : { viewtemplate: hasTable },
       }),
       new Field({
         name: "min_role",
@@ -242,7 +246,11 @@ const viewForm = async (req, tableOptions, roles, pages, values) => {
             mapObjectValues(slugOptions, (lvs) => lvs.map((lv) => lv.label)),
           ],
         },
-        showIf: { viewtemplate: hasTable },
+        showIf: isEdit
+          ? hasTable.includes(values.viewtemplate)
+            ? undefined
+            : { nosuchvar: true }
+          : { viewtemplate: hasTable },
       }),
       new Field({
         name: "no_menu",
@@ -371,6 +379,7 @@ router.get(
     const form = await viewForm(req, tableOptions, roles, pages, viewrow);
     const inbound_connected = await viewrow.inbound_connected_objects();
     form.hidden("id");
+    form.onChange = `saveAndContinue(this)`;
     res.sendWrap(req.__(`Edit view`), {
       above: [
         {
@@ -383,6 +392,7 @@ router.get(
         {
           type: "card",
           class: "mt-0",
+          titleAjaxIndicator: true,
           title: req.__(
             `%s view - %s on %s`,
             viewname,
@@ -541,12 +551,14 @@ router.post(
           //console.log(v);
           await View.create(v);
         }
-        res.redirect(
-          addOnDoneRedirect(
-            `/viewedit/config/${encodeURIComponent(v.name)}`,
-            req
-          )
-        );
+        if (req.xhr) res.json({ success: "ok" });
+        else
+          res.redirect(
+            addOnDoneRedirect(
+              `/viewedit/config/${encodeURIComponent(v.name)}`,
+              req
+            )
+          );
       }
     } else {
       sendForm(form);
@@ -902,7 +914,7 @@ router.post(
           ? `/${req.query.on_done_redirect}`
           : "/viewedit";
       res.redirect(redirectTarget);
-    } else res.json({ okay: true, responseText: message });
+    } else res.json({ success: "ok" });
   })
 );
 

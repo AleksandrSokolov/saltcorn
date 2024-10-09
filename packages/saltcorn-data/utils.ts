@@ -155,6 +155,14 @@ function sleep(ms: number) {
 
 const mergeIntoWhere = (where: Where, newWhere: GenObj) => {
   Object.entries(newWhere).forEach(([k, v]) => {
+    if (k == "or") {
+      if (where.and) where.and.push({ or: v });
+      else if (where.or) {
+        where.and = [{ or: where.or }, { or: v }];
+        delete where.or;
+      } else where.or = v;
+      return;
+    }
     if (typeof where[k] === "undefined") where[k] = v;
     else where[k] = [where[k], v];
   });
@@ -249,10 +257,16 @@ const mergeConnectedObjects = (
   };
 };
 
-const objectToQueryString = (o: Object): string =>
-  Object.entries(o || {})
-    .map(([k, v]: any) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+const objectToQueryString = (o: Object): string => {
+  const f = ([k, v]: any) =>
+    v?.or
+      ? v.or.map((val: any) => f([k, val])).join("&")
+      : `${encodeURIComponent(k)}=${encodeURIComponent(v)}`;
+
+  return Object.entries(o || {})
+    .map(f)
     .join("&");
+};
 
 const urlStringToObject = (url: string): any => {
   if (!url) return {};
@@ -378,6 +392,12 @@ const comparingCaseInsensitive = (k: string) => (a: any, b: any) => {
   return fa > fb ? 1 : fb > fa ? -1 : 0;
 };
 
+const comparingCaseInsensitiveValue = (a: any, b: any) => {
+  const fa = a?.toLowerCase?.();
+  const fb = b?.toLowerCase?.();
+  return fa > fb ? 1 : fb > fa ? -1 : 0;
+};
+
 const ppVal = (x: any) =>
   typeof x === "string"
     ? x
@@ -406,6 +426,7 @@ const prepMobileRows = (rows: Row[], fields: Field[]) => {
       const newRow = { ...row };
       for (const fn of dateFieldNames) {
         if (newRow[fn]) newRow[fn] = new Date(newRow[fn]);
+        if (newRow.row?.[fn]) newRow.row[fn] = new Date(newRow.row[fn]);
       }
       return newRow;
     });
@@ -430,7 +451,43 @@ const safeEnding = (file: string, ending: string): string => {
   return file;
 };
 
+const cloneName = (name: string, allNames: Array<string>): string => {
+  const basename = name + "-copy";
+  let newname = basename;
+  // todo there is hard code limitation about 100 copies of view
+  for (let i = 0; i < 100; i++) {
+    newname = i ? `${basename}-${i}` : basename;
+
+    if (!allNames.includes(newname)) break;
+  }
+  return newname;
+};
+
+/**
+ * @returns if the current schema is the default root schema
+ */
+const isRoot = () => {
+  const db = require("./db");
+  return db.getTenantSchema() === db.connectObj.default_schema;
+};
+
+/**
+ * flat comparison of two objects (fast for comparing objects with primitive values, only first level)
+ * @param a lhs
+ * @param b rhs
+ * @returns true or false
+ */
+const flatEqual = (a: any, b: any) => {
+  if (typeof a !== "object" || typeof b !== "object") return false;
+  if (Object.keys(a).length !== Object.keys(b).length) return false;
+  for (const k in a) {
+    if (!(k in b) || a[k] !== b[k]) return false;
+  }
+  return true;
+};
+
 export = {
+  cloneName,
   dollarizeObject,
   objectToQueryString,
   removeEmptyStrings,
@@ -469,9 +526,12 @@ export = {
   urlStringToObject,
   comparing,
   comparingCaseInsensitive,
+  comparingCaseInsensitiveValue,
   ppVal,
   interpolate,
   prepMobileRows,
   fileWithEnding,
   safeEnding,
+  isRoot,
+  flatEqual,
 };

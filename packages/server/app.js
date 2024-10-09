@@ -52,6 +52,7 @@ const locales = Object.keys(available_languages);
 const i18n = new I18n({
   locales,
   directory: path.join(__dirname, "locales"),
+  mustacheConfig: { disable: true },
 });
 // jwt config
 const jwt_secret = db.connectObj.jwt_secret;
@@ -173,9 +174,13 @@ const getApp = async (opts = {}) => {
     const tenants = await getAllTenants();
     await init_multi_tenant(loadAllPlugins, opts.disableMigrate, tenants);
   }
+  const pruneSessionInterval = +getState().getConfig(
+    "prune_session_interval",
+    900
+  );
   //
   // todo ability to configure session_secret Age
-  app.use(getSessionStore());
+  app.use(getSessionStore(pruneSessionInterval));
 
   app.use(passport.initialize());
   app.use(passport.authenticate(["jwt", "session"]));
@@ -299,15 +304,11 @@ const getApp = async (opts = {}) => {
         if (
           u &&
           u.last_mobile_login &&
-          u.last_mobile_login <= jwt_payload.iat
+          (typeof u.last_mobile_login === "string"
+            ? new Date(u.last_mobile_login).valueOf()
+            : u.last_mobile_login) <= jwt_payload.iat
         ) {
-          return done(null, {
-            email: u.email,
-            id: u.id,
-            role_id: u.role_id,
-            language: u.language,
-            tenant: db.getTenantSchema(),
-          });
+          return done(null, u.session_object);
         } else {
           return done(null, { role_id: 100 });
         }
@@ -444,6 +445,9 @@ Sitemap: ${base}sitemap.xml
   app.get("*", function (req, res) {
     res.status(404).sendWrap(req.__("Not found"), h1(req.__("Page not found")));
   });
+
+  //prevent prototype pollution
+  delete Object.prototype.__proto__;
   return app;
 };
 module.exports = getApp;

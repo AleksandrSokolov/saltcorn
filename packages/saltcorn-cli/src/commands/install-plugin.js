@@ -2,8 +2,8 @@
  * @category saltcorn-cli
  * @module commands/install-plugin
  */
-const { Command, flags } = require("@oclif/command");
-const { maybe_as_tenant } = require("../common");
+const { Command, Flags } = require("@oclif/core");
+const { maybe_as_tenant, init_some_tenants } = require("../common");
 const fs = require("fs");
 const path = require("path");
 
@@ -17,7 +17,7 @@ class InstallPluginCommand extends Command {
    * @returns {Promise<void>}
    */
   async run() {
-    const { flags } = this.parse(InstallPluginCommand);
+    const { flags } = await this.parse(InstallPluginCommand);
     const {
       fetch_pack_by_name,
       install_pack,
@@ -30,12 +30,8 @@ class InstallPluginCommand extends Command {
       );
       this.exit(1);
     }
-    const { loadAllPlugins } = require("@saltcorn/server/load_plugins");
-    const { init_multi_tenant } = require("@saltcorn/data/db/state");
-    const { getAllTenants } = require("@saltcorn/admin-models/models/tenant");
-    await loadAllPlugins();
-    const tenants = await getAllTenants();
-    await init_multi_tenant(loadAllPlugins, undefined, tenants);
+
+    await init_some_tenants(flags.tenant);
 
     const Plugin = require("@saltcorn/data/models/plugin");
 
@@ -48,7 +44,13 @@ class InstallPluginCommand extends Command {
         }
         delete plugin.id;
 
-        await load_plugins.loadAndSaveNewPlugin(plugin);
+        await load_plugins.loadAndSaveNewPlugin(
+          plugin,
+          undefined,
+          undefined,
+          (s) => s,
+          !!flags.unsafe
+        );
       } else if (flags.directory) {
         const pkgpath = path.join(flags.directory, "package.json");
         if (!fs.existsSync(pkgpath)) {
@@ -64,7 +66,7 @@ class InstallPluginCommand extends Command {
           });
           await load_plugins.loadAndSaveNewPlugin(plugin);
         } catch (e) {
-          console.error(e.message);
+          console.error(e);
           this.exit(1);
         }
       }
@@ -82,17 +84,21 @@ InstallPluginCommand.description = `Install a plugin`;
  * @type {object}
  */
 InstallPluginCommand.flags = {
-  tenant: flags.string({
+  tenant: Flags.string({
     char: "t",
     description: "tenant",
   }),
-  name: flags.string({
+  name: Flags.string({
     char: "n",
     description: "Plugin name in store",
   }),
-  directory: flags.string({
+  directory: Flags.string({
     char: "d",
     description: "Directory with local plugin",
+  }),
+  unsafe: Flags.boolean({
+    char: "u",
+    description: "Allow unsafe plugins on tenants",
   }),
 };
 

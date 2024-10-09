@@ -14,7 +14,12 @@ const {
   readState,
 } = require("../plugin-helper");
 const { getState } = require("../db/state");
-const { satisfies, urlStringToObject } = require("../utils");
+const {
+  satisfies,
+  urlStringToObject,
+  cloneName,
+  objectToQueryString,
+} = require("../utils");
 
 import { afterAll, beforeAll, describe, it, expect } from "@jest/globals";
 import mocks from "./mocks";
@@ -37,6 +42,13 @@ beforeAll(async () => {
 });
 
 afterAll(db.close);
+
+describe("Clone names", () => {
+  it("should work", async () => {
+    expect(cloneName("Foo", [])).toBe("Foo-copy");
+    expect(cloneName("Foo", ["Foo-copy"])).toBe("Foo-copy-1");
+  });
+});
 
 describe("plugin helper", () => {
   it("get parent views", async () => {
@@ -513,5 +525,19 @@ describe("plugin helper", () => {
       req: mockReqRes.req,
     });
     expect(flds1.length).toBeGreaterThan(1);
+  });
+});
+
+describe("objectToQueryString", () => {
+  it("ordinary works", async () => {
+    expect(objectToQueryString({})).toBe("");
+    expect(objectToQueryString({ a: 5 })).toBe("a=5");
+    expect(objectToQueryString({ a: 5, b: "Foo" })).toBe("a=5&b=Foo");
+    expect(objectToQueryString({ a: 5, b: "F oo" })).toBe("a=5&b=F%20oo");
+  });
+  it("collects or", async () => {
+    expect(objectToQueryString({ a: { or: ["Foo", "Bar"] } })).toBe(
+      "a=Foo&a=Bar"
+    );
   });
 });

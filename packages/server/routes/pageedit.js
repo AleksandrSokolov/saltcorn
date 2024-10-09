@@ -94,7 +94,7 @@ const pagePropertiesForm = async (req, isNew) => {
           if (groups.includes(s) && isNew)
             return req.__("A page group with this name already exists");
         },
-        sublabel: req.__("A short name that will be in your URL"),
+        sublabel: req.__("A short name that will be in the page URL"),
         type: "String",
         attributes: { autofocus: true },
       }),
@@ -107,13 +107,15 @@ const pagePropertiesForm = async (req, isNew) => {
       new Field({
         label: req.__("Description"),
         name: "description",
-        sublabel: req.__("A longer description"),
+        sublabel: req.__(
+          "A longer description that is not visible but appears in the page header and is indexed by search engines"
+        ),
         input_type: "text",
       }),
       {
         name: "min_role",
         label: req.__("Minimum role"),
-        sublabel: req.__("Role required to access page"),
+        sublabel: req.__("User role required to access page"),
         input_type: "select",
         options: roles.map((r) => ({ value: r.id, label: r.role })),
       },
@@ -181,6 +183,12 @@ const pageBuilderData = async (req, context) => {
       });
     }
   }
+  const actionsNotRequiringRow = Trigger.action_options({
+    notRequireRow: true,
+    apiNeverTriggers: true,
+    builtInLabel: "Page Actions",
+    builtIns: ["GoBack"],
+  });
   const library = (await Library.find({})).filter((l) => l.suitableFor("page"));
   const fixed_state_fields = {};
   for (const view of views) {
@@ -226,7 +234,7 @@ const pageBuilderData = async (req, context) => {
     images,
     pages,
     page_groups,
-    actions,
+    actions: actionsNotRequiringRow,
     builtInActions: ["GoBack"],
     library,
     min_role: context.min_role,
@@ -338,6 +346,15 @@ router.get(
         },
         {
           type: "card",
+          title: req.__("Root pages"),
+          titleAjaxIndicator: true,
+          contents: renderForm(
+            getRootPageForm(pages, pageGroups, roles, req),
+            req.csrfToken()
+          ),
+        },
+        {
+          type: "card",
           title: req.__("Your page groups"),
           contents: div(
             p(
@@ -355,15 +372,6 @@ router.get(
               },
               req.__("Create page group")
             )
-          ),
-        },
-        {
-          type: "card",
-          title: req.__("Root pages"),
-          titleAjaxIndicator: true,
-          contents: renderForm(
-            getRootPageForm(pages, pageGroups, roles, req),
-            req.csrfToken()
           ),
         },
       ],
@@ -392,6 +400,7 @@ const wrap = (contents, noCard, req, page) => ({
     {
       type: noCard ? "container" : "card",
       title: page ? page.name : req.__("New"),
+      titleAjaxIndicator: true,
       contents,
     },
   ],
@@ -418,6 +427,7 @@ router.get(
       form.hidden("id");
       form.values = page;
       form.values.no_menu = page.attributes?.no_menu;
+      form.onChange = `saveAndContinue(this)`;
       res.sendWrap(
         req.__(`Page attributes`),
         wrap(renderForm(form, req.csrfToken()), false, req, page)
@@ -477,7 +487,8 @@ router.post(
           pageRow.layout = {};
         }
         await Page.update(+id, pageRow);
-        res.redirect(`/pageedit/`);
+        if (req.xhr) res.json({ success: "ok" });
+        else res.redirect(`/pageedit/`);
       } else {
         if (!pageRow.layout) pageRow.layout = {};
         if (!pageRow.fixed_states) pageRow.fixed_states = {};

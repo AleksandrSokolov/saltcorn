@@ -247,6 +247,12 @@ router.get(
     );
     if (!table) {
       getState().log(3, `API get ${tableName} table not found`);
+      getState().log(
+        6,
+        `API get failure additonal info: URL=${req.originalUrl}${
+          getState().getConfig("log_ip_address", false) ? ` IP=${req.ip}` : ""
+        }`
+      );
       res.status(404).json({ error: req.__("Not found") });
       return;
     }
@@ -361,8 +367,11 @@ router.all(
             else if (req.headers?.scgotourl)
               res.redirect(req.headers?.scgotourl);
             else {
-              if (trigger.configuration?._raw_output) res.json({ resp });
-              else res.json({ success: true, data: resp });
+              if (trigger.configuration?._raw_output) res.json(resp);
+              else if (resp?.error) {
+                const { error, ...rest } = resp;
+                res.json({ success: false, error, data: rest });
+              } else res.json({ success: true, data: resp });
             }
           } catch (e) {
             Crash.create(e, req);

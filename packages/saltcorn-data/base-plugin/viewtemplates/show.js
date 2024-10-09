@@ -112,27 +112,16 @@ const configuration_workflow = (req) =>
             "GoBack",
             ...boolfields.map((f) => `Toggle ${f.name}`),
           ];
-          const actions = [
-            ...builtInActions,
-            ...stateActions.map(([k, v]) => k),
-          ];
-          const triggerActions = [];
-          (
-            await Trigger.find({
-              when_trigger: { or: ["API call", "Never"] },
-              table_id: null,
-            })
-          ).forEach((tr) => {
-            actions.push(tr.name);
-            triggerActions.push(tr.name);
+
+          const triggerActions = Trigger.trigger_actions({
+            tableTriggers: table.id,
+            apiNeverTriggers: true,
           });
-          (
-            await Trigger.find({
-              table_id: context.table_id,
-            })
-          ).forEach((tr) => {
-            actions.push(tr.name);
-            triggerActions.push(tr.name);
+          const actions = Trigger.action_options({
+            tableTriggers: table.id,
+            apiNeverTriggers: true,
+            builtInLabel: "Show Actions",
+            builtIns: builtInActions,
           });
           for (const field of fields) {
             if (field.type === "Key") {
@@ -145,9 +134,19 @@ const configuration_workflow = (req) =>
           const actionConfigForms = {
             Delete: [
               {
+                name: "after_delete_action",
+                label: req.__("After delete"),
+                type: "String",
+                required: true,
+                attributes: {
+                  options: ["Go to URL", "Reload page"],
+                },
+              },
+              {
                 name: "after_delete_url",
                 label: req.__("URL after delete"),
                 type: "String",
+                showIf: { after_delete_action: "Go to URL" },
               },
             ],
           };
@@ -734,6 +733,7 @@ const render = (
     card(segment) {
       evalMaybeExpr(segment, "url");
       evalMaybeExpr(segment, "title");
+      evalMaybeExpr(segment, "class");
     },
     image(segment) {
       evalMaybeExpr(segment, "url");
@@ -931,7 +931,17 @@ const render = (
         "rndid",
         segment.confirm
       );
-      if (segment.action_name === "Delete")
+      if (
+        segment.action_name === "Delete" &&
+        segment.configuration?.after_delete_action == "Reload page"
+      ) {
+        url = {
+          javascript: `ajax_post('/delete/${table.name}/${
+            row[table.pk_name]
+          }', {success:()=>{close_saltcorn_modal();location.reload();}})`,
+        };
+        return action_link(url, req, segment);
+      } else if (segment.action_name === "Delete")
         url = `/delete/${table.name}/${
           row[table.pk_name]
         }?redirect=${encodeURIComponent(

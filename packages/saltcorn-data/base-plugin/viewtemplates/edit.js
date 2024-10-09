@@ -38,11 +38,13 @@ const {
 const {
   InvalidConfiguration,
   isNode,
-  isOfflineMode,
+  isWeb,
   mergeIntoWhere,
   dollarizeObject,
   getSessionId,
   interpolate,
+  asyncMap,
+  removeEmptyStrings,
 } = require("../../utils");
 const Library = require("../../models/library");
 const { check_view_columns } = require("../../plugin-testing");
@@ -79,7 +81,6 @@ const {
   translateLayout,
   traverseSync,
 } = require("../../models/layout");
-const { asyncMap, isWeb, removeEmptyStrings } = require("../../utils");
 const { extractFromLayout } = require("../../diagram/node_extract_utils");
 const db = require("../../db");
 const { prepare_update_row } = require("../../web-mobile-commons");
@@ -128,28 +129,17 @@ const configuration_workflow = (req) =>
           const stateActions = Object.entries(getState().actions).filter(
             ([k, v]) => !v.disableInBuilder
           );
-          const actions = [
-            ...builtInActions,
-            ...stateActions.map(([k, v]) => k),
-          ];
-          const triggerActions = [];
-          (
-            await Trigger.find({
-              when_trigger: { or: ["API call", "Never"] },
-              table_id: null,
-            })
-          ).forEach((tr) => {
-            actions.push(tr.name);
-            triggerActions.push(tr.name);
+          const triggerActions = Trigger.trigger_actions({
+            tableTriggers: table.id,
+            apiNeverTriggers: true,
           });
-          (
-            await Trigger.find({
-              table_id: context.table_id,
-            })
-          ).forEach((tr) => {
-            actions.push(tr.name);
-            triggerActions.push(tr.name);
+          const actions = Trigger.action_options({
+            tableTriggers: table.id,
+            apiNeverTriggers: true,
+            builtInLabel: "Edit Actions",
+            builtIns: builtInActions,
           });
+
           const actionConfigForms = {
             Delete: [
               {
@@ -517,7 +507,7 @@ const run = async (
   { res, req },
   { editQuery }
 ) => {
-  const mobileReferrer = isNode() ? undefined : req?.headers?.referer;
+  const mobileReferrer = isWeb(req) ? undefined : req?.headers?.referer;
   return await editQuery(state, mobileReferrer);
 };
 
@@ -791,13 +781,13 @@ const transformForm = async ({
                 view.table_id,
                 view_select,
                 row.id,
-                segment.owner_field
+                segment.order_field
               )
             : await childTable.getRows(
                 {
                   [view_select.field_name]: row.id,
                 },
-                segment.owner_field ? { orderBy: segment.owner_field } : {}
+                segment.order_field ? { orderBy: segment.order_field } : {}
               );
           fr.metadata.rows = childRows;
           if (!fr.fields.map((f) => f.name).includes(childTable.pk_name))
@@ -938,7 +928,7 @@ const render = async ({
   if (row) {
     form.values = row;
     const file_fields = form.fields.filter((f) => f.type === "File");
-    if (isNode()) {
+    if (isWeb(req)) {
       for (const field of file_fields) {
         if (field.fieldviewObj?.valueIsFilename && row[field.name]) {
           const file = await File.findOne({ id: row[field.name] });
@@ -1034,7 +1024,13 @@ const render = async ({
       ? script(
           domReady(`
     $("#scmodal").on("hidden.bs.modal", function (e) {
-      setTimeout(()=>location.reload(),0);
+     const on_close_reload_view = $("#scmodal").attr(
+        "data-on-close-reload-view"
+      );
+      if(on_close_reload_view)
+        reload_embedded_view(on_close_reload_view)
+      else
+        setTimeout(()=>location.reload(),0);
     });`)
         )
       : "";
@@ -1776,12 +1772,12 @@ const prepare = async (
         row[field.name] = path_to_serve;
       }
     } else if (req.files && req.files[field.name]) {
-      if (!isNode() && !remote && req.files[field.name].name) {
+      if (!isWeb(req) && !remote && req.files[field.name].name) {
         throw new Error(
           "The mobile-app supports no local files, please use a remote table."
         );
       }
-      if (isNode()) {
+      if (isWeb(req)) {
         const file = await File.from_req_files(
           req.files[field.name],
           req.user ? req.user.id : null,

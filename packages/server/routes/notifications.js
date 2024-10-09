@@ -13,7 +13,8 @@ const { getState } = require("@saltcorn/data/db/state");
 const Form = require("@saltcorn/data/models/form");
 const File = require("@saltcorn/data/models/file");
 const User = require("@saltcorn/data/models/user");
-const { renderForm } = require("@saltcorn/markup");
+const { renderForm, post_btn } = require("@saltcorn/markup");
+const db = require("@saltcorn/data/db");
 
 const router = new Router();
 module.exports = router;
@@ -31,22 +32,59 @@ router.get(
   "/",
   loggedIn,
   error_catcher(async (req, res) => {
-    const nots = await Notification.find(
-      { user_id: req.user.id },
-      { orderBy: "id", orderDesc: true, limit: 20 }
-    );
-    await Notification.mark_as_read({
-      id: { in: nots.filter((n) => !n.read).map((n) => n.id) },
+    const { after } = req.query;
+    const where = { user_id: req.user.id };
+    if (after) where.id = { lt: after };
+    const nots = await Notification.find(where, {
+      orderBy: "id",
+      orderDesc: true,
+      limit: 20,
     });
+    const unreads = nots.filter((n) => !n.read);
+    if (unreads.length > 0)
+      await Notification.mark_as_read(
+        !db.isSQLite
+          ? {
+              id: { in: unreads.map((n) => n.id) },
+            }
+          : {
+              or: unreads.map((n) => ({ id: n.id })),
+            }
+      );
+
+    const form = notificationSettingsForm();
+    const user = await User.findOne({ id: req.user?.id });
+    form.values = { notify_email: user?._attributes?.notify_email };
     const notifyCards = nots.length
       ? nots.map((not) => ({
           type: "card",
           class: [!not.read && "unread-notify"],
+          id: `notify-${not.id}`,
           contents: [
             div(
               { class: "d-flex" },
               span({ class: "fw-bold" }, not.title),
-              span({ class: "ms-2 text-muted" }, moment(not.created).fromNow())
+              span(
+                {
+                  class: "ms-2 text-muted",
+                  title: not.created.toLocaleString(req.getLocale()),
+                },
+                moment(not.created).fromNow()
+              ),
+              div(
+                { class: "ms-auto" },
+                post_btn(
+                  `/notifications/delete/${not.id}`,
+                  "",
+                  req.csrfToken(),
+                  {
+                    icon: "fas fa-times-circle",
+                    klass: "btn-link text-muted text-decoration-none p-0",
+                    ajax: true,
+                    onClick: `$('#notify-${not.id}').remove()`,
+                  }
+                )
+              )
             ),
             not.body && p(not.body),
             not.link && a({ href: not.link }, "Link"),
@@ -58,6 +96,35 @@ router.get(
             contents: [h5(req.__("No notifications"))],
           },
         ];
+    const pageLinks = div(
+      { class: "d-flex mt-3 mb-3" },
+      nots.length == 20
+        ? div(
+            after &&
+              a(
+                { href: `/notifications`, class: "me-2" },
+                "&larr; " + req.__("Newest")
+              ),
+            a(
+              { href: `/notifications?after=${nots[19].id}` },
+              req.__("Older") + " &rarr;"
+            )
+          )
+        : div(),
+      nots.length > 0 &&
+        div(
+          { class: "ms-auto" },
+          post_btn(
+            `/notifications/delete/read`,
+            req.__("Delete all read"),
+            req.csrfToken(),
+            {
+              icon: "fas fa-trash",
+              klass: "btn-sm btn-danger",
+            }
+          )
+        )
+    );
     res.sendWrap(req.__("Notifications"), {
       above: [
         {
@@ -72,10 +139,10 @@ router.get(
               type: "card",
               contents: [
                 req.__("Receive notifications by:"),
-                renderForm(notificationSettingsForm(), req.csrfToken()),
+                renderForm(form, req.csrfToken()),
               ],
             },
-            { above: notifyCards },
+            { above: [...notifyCards, pageLinks] },
           ],
         },
       ],
@@ -109,9 +176,27 @@ router.post(
   })
 );
 
-router.get(
-  "/manifest.json",
+router.post(
+  "/delete/:idlike",
+  loggedIn,
   error_catcher(async (req, res) => {
+    const { idlike } = req.params;
+    if (idlike == "read") {
+      await Notification.deleteRead(req.user.id);
+    } else {
+      const id = +idlike;
+      const notif = await Notification.findOne({ id });
+      if (notif?.user_id == req.user?.id) await notif.delete();
+    }
+    if (req.xhr) res.json({ success: "ok" });
+    else res.redirect("/notifications");
+  })
+);
+
+router.get(
+  "/manifest.json:opt_cache_bust?",
+  error_catcher(async (req, res) => {
+    const { pretty } = req.query;
     const state = getState();
     const manifest = {
       name: state.getConfig("site_name"),
@@ -123,7 +208,7 @@ router.get(
     if (Array.isArray(pwa_icons) && pwa_icons.length > 0)
       manifest.icons = pwa_icons.map(({ image, size, maskable }) => ({
         src: `/files/serve/${image}`,
-        type: File.nameToMimeType(site_logo),
+        type: File.nameToMimeType(image),
         sizes: size ? `${size}x${size}` : "144x144",
         ...(maskable ? { purpose: "maskable" } : {}),
       }));
@@ -142,6 +227,11 @@ router.get(
         "red"
       );
     }
-    res.json(manifest);
+    if (!pretty) res.json(manifest);
+    else {
+      const prettyJson = JSON.stringify(manifest, null, 2);
+      res.setHeader("Content-Type", "application/json");
+      res.send(prettyJson);
+    }
   })
 );

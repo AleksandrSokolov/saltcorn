@@ -373,15 +373,19 @@ const render = ({
         ix,
         a(
           {
-            href: segment.in_modal
-              ? isWeb
-                ? `javascript:ajax_modal('${segment.url}');`
-                : `javascript:mobile_modal('${segment.url}');`
-              : isWeb
-              ? segment.url
-              : `javascript:execLink('${segment.url}', '${
-                  segment.link_src || "URL"
-                }')`,
+            ...(isWeb
+              ? {
+                  href: segment.in_modal
+                    ? `javascript:ajax_modal('${segment.url}');`
+                    : segment.url,
+                }
+              : {
+                  onclick: segment.in_modal
+                    ? `javascript:mobile_modal('${segment.url}');`
+                    : `execLink('${segment.url}', '${
+                        segment.link_src || "URL"
+                      }')`,
+                }),
             class: [segment.link_style || "", segment.link_size || ""],
             target: isWeb && segment.target_blank ? "_blank" : false,
             title: segment.link_title,
@@ -446,7 +450,7 @@ const render = ({
               segment.titleAjaxIndicator &&
                 span(
                   {
-                    class: "float-end sc-ajax-indicator",
+                    class: "float-end ms-auto sc-ajax-indicator",
                     style: { display: "none" },
                   },
                   i({ class: "fas fa-save" })
@@ -787,6 +791,7 @@ const render = ({
           {
             class: [
               "row",
+              segment.class,
               sameWidths &&
                 `row-cols-1 row-cols-md-${segment.besides.length} g-4`,
               "g-4",
@@ -823,6 +828,7 @@ const render = ({
           {
             class: [
               "row",
+              segment.class,
               segment.style && segment.style.width ? null : "w-100",
               typeof segment.gx !== "undefined" &&
                 segment.gx !== null &&

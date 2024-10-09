@@ -56,8 +56,8 @@ import type TableConstraint from "./table_constraints";
 
 import csvtojson from "csvtojson";
 import moment from "moment";
-import { createReadStream } from "fs";
-import { stat, readFile } from "fs/promises";
+import { createReadStream, createWriteStream } from "fs";
+import { stat, readFile, writeFile, open } from "fs/promises";
 //import { num_between } from "@saltcorn/types/generators";
 //import { devNull } from "os";
 import utils from "../utils";
@@ -954,11 +954,24 @@ class Table implements AbstractTable {
       state.log(4, `Not authorized to deleteRows in table ${this.name}.`);
       return;
     }
+    const calc_agg_fields = await Field.find(
+      {
+        calculated: true,
+        stored: true,
+        expression: "__aggregation",
+        attributes: { json: { table: this.name } },
+      },
+      { cached: true }
+    );
     let rows;
-    if (user && user.role_id > this.min_role_write && this.ownership_formula) {
+    if (
+      calc_agg_fields.length ||
+      (user && user.role_id > this.min_role_write && this.ownership_formula)
+    ) {
       rows = await this.getJoinedRows({
         where,
         forUser: user,
+        forPublic: !user,
       });
     }
 
@@ -1005,6 +1018,7 @@ class Table implements AbstractTable {
           )}" in (${delIds.join(",")})`
         );
       }
+      for (const row of rows) await this.auto_update_calc_aggregations(row);
       if (this.has_sync_info) {
         const dbTime = await db.time();
         await this.addDeleteSyncInfo(rows, dbTime);
@@ -1293,7 +1307,8 @@ class Table implements AbstractTable {
     noTrigger?: boolean,
     resultCollector?: object,
     restore_of_version?: any,
-    syncTimestamp?: Date
+    syncTimestamp?: Date,
+    additionalTriggerValues?: Row
   ): Promise<string | void> {
     let existing;
     let v = { ...v_in };
@@ -1302,6 +1317,15 @@ class Table implements AbstractTable {
     const role = user?.role_id;
     const state = require("../db/state").getState();
     let stringified = false;
+    const sqliteJsonCols = !isNode()
+      ? {
+          jsonCols: this.fields
+            .filter(
+              (f) => typeof f.type !== "string" && f.type?.name === "JSON"
+            )
+            .map((f) => f.name),
+        }
+      : {};
     if (typeof id === "undefined")
       throw new Error(
         this.name + " updateRow called without primary key value"
@@ -1334,7 +1358,7 @@ class Table implements AbstractTable {
         );
         if (!owner_field)
           throw new Error(`Owner field in table ${this.name} not found`);
-        if (v[owner_field.name] && v[owner_field.name] !== user.id) {
+        if (v[owner_field.name] && v[owner_field.name] != user.id) {
           state.log(
             4,
             `Not authorized to updateRow in table ${this.name}. ${user.id} does not match owner field in updates`
@@ -1411,7 +1435,7 @@ class Table implements AbstractTable {
       await Trigger.runTableTriggers(
         "Validate",
         this,
-        { ...existing, ...v },
+        { ...(additionalTriggerValues || {}), ...existing, ...v },
         valResCollector,
         user,
         { old_row: existing, updated_fields: v_in }
@@ -1444,7 +1468,10 @@ class Table implements AbstractTable {
         );
         this.stringify_json_fields(v);
         stringified = true;
-        await db.update(this.name, v, id, { pk_name });
+        await db.update(this.name, v, id, {
+          pk_name,
+          ...sqliteJsonCols,
+        });
         updated = await this.getJoinedRow({
           where: { [pk_name]: id },
           forUser: user,
@@ -1454,7 +1481,6 @@ class Table implements AbstractTable {
 
       let calced = await apply_calculated_fields_stored(
         need_to_update ? updated : { ...existing, ...v_in },
-        // @ts-ignore TODO ch throw ?
         this.fields,
         this
       );
@@ -1489,7 +1515,10 @@ class Table implements AbstractTable {
     }
     state.log(6, `Updating ${this.name}: ${JSON.stringify(v)}, id=${id}`);
     if (!stringified) this.stringify_json_fields(v);
-    await db.update(this.name, v, id, { pk_name });
+    await db.update(this.name, v, id, {
+      pk_name,
+      ...sqliteJsonCols,
+    });
 
     if (this.has_sync_info) {
       const oldInfo = await this.latestSyncInfo(id);
@@ -1505,7 +1534,7 @@ class Table implements AbstractTable {
       const trigPromise = Trigger.runTableTriggers(
         "Update",
         this,
-        newRow,
+        { ...(additionalTriggerValues || {}), ...newRow },
         resultCollector,
         role === 100 ? undefined : user,
         { old_row: existing, updated_fields: v_in }
@@ -1704,7 +1733,7 @@ class Table implements AbstractTable {
       if (
         typeof row[field.name] !== "undefined" &&
         field.attributes?.min_role_write &&
-        user.role_id > field.attributes?.min_role_write
+        user.role_id > +field.attributes?.min_role_write
       )
         return "Not authorized";
     }
@@ -1733,12 +1762,13 @@ class Table implements AbstractTable {
    * @returns {Promise<*>}
    */
   async insertRow(
-    v_in: Row,
+    v_in0: Row,
     user?: Row,
     resultCollector?: object,
     noTrigger?: boolean,
     syncTimestamp?: Date
   ): Promise<any> {
+    const v_in = { ...v_in0 };
     const fields = this.fields;
     const pk_name = this.pk_name;
     const joinFields = this.storedExpressionJoinFields();
@@ -1750,6 +1780,15 @@ class Table implements AbstractTable {
       );
     let v, id;
     const state = require("../db/state").getState();
+    const sqliteJsonCols = !isNode()
+      ? {
+          jsonCols: this.fields
+            .filter(
+              (f) => typeof f.type !== "string" && f.type?.name === "JSON"
+            )
+            .map((f) => f.name),
+        }
+      : {};
     if (user && user.role_id > this.min_role_write) {
       if (this.ownership_field_id) {
         const owner_field = fields.find(
@@ -1757,7 +1796,7 @@ class Table implements AbstractTable {
         );
         if (!owner_field)
           throw new Error(`Owner field in table ${this.name} not found`);
-        if (v_in[owner_field.name] !== user.id) {
+        if (v_in[owner_field.name] != user.id) {
           state.log(
             4,
             `Not authorized to insertRow in table ${this.name}. ${user.id} does not match owner field`
@@ -1802,7 +1841,7 @@ class Table implements AbstractTable {
         `Inserting ${this.name} because join fields: ${JSON.stringify(v_in)}`
       );
       this.stringify_json_fields(v_in);
-      id = await db.insert(this.name, v_in, { pk_name });
+      id = await db.insert(this.name, v_in, { pk_name, ...sqliteJsonCols });
       let existing = await this.getJoinedRows({
         where: { [pk_name]: id },
         joinFields,
@@ -1831,12 +1870,15 @@ class Table implements AbstractTable {
         6,
         `Updating ${this.name} because join fields: ${JSON.stringify(v_in)}`
       );
-      await db.update(this.name, v, id, { pk_name });
+      await db.update(this.name, v, id, { pk_name, ...sqliteJsonCols });
     } else {
       v = await apply_calculated_fields_stored(v_in, fields, this);
       this.stringify_json_fields(v);
       state.log(6, `Inserting ${this.name} row: ${JSON.stringify(v)}`);
-      id = await db.insert(this.name, v, { pk_name });
+      id = await db.insert(this.name, v, {
+        pk_name,
+        ...sqliteJsonCols,
+      });
     }
     if (user && user.role_id > this.min_role_write && this.ownership_formula) {
       let existing = await this.getJoinedRow({
@@ -2471,6 +2513,25 @@ class Table implements AbstractTable {
     return errorString || state;
   }
 
+  async dump_to_json(filePath: string) {
+    if (db.copyToJson) {
+      await dump_table_to_json_file(filePath, this.name);
+    } else {
+      const rows = await this.getRows({}, { ignore_errors: true });
+      await writeFile(filePath, JSON.stringify(rows));
+    }
+  }
+  async dump_history_to_json(filePath: string) {
+    if (db.copyToJson) {
+      await dump_table_to_json_file(
+        filePath,
+        `${sqlsanitize(this.name)}__history`
+      );
+    } else {
+      const rows = await this.get_history();
+      await writeFile(filePath, JSON.stringify(rows));
+    }
+  }
   /**
    * Import CSV file to existing table
    * @param filePath
@@ -2821,8 +2882,11 @@ class Table implements AbstractTable {
     filePath: string,
     skip_first_data_row?: boolean
   ): Promise<any> {
+    const contents = (await readFile(filePath)).toString();
+
     // todo argument type buffer is not assignable for type String...
-    const file_rows = JSON.parse((await readFile(filePath)).toString());
+    const file_rows = contents === "\\N\n" ? [] : JSON.parse(contents);
+
     const fields = this.fields;
     const pk_name = this.pk_name;
     const { readState } = require("../plugin-helper");
@@ -3592,6 +3656,20 @@ class Table implements AbstractTable {
       this.fields.filter((f) => !f.calculated)
     );
   }
+}
+
+async function dump_table_to_json_file(filePath: string, tableName: string) {
+  const writeStream = createWriteStream(filePath);
+  const client = db.isSQLite ? db : await db.getClient();
+  writeStream.write("[");
+  await db.copyToJson(writeStream, tableName, client);
+  if (!db.isSQLite) await client.release(true);
+  writeStream.destroy();
+  const h = await open(filePath, "r+");
+  const stat = await h.stat();
+  if (stat.size > 2) await h.write("]", stat.size - 2);
+  else await h.write("]", stat.size);
+  await h.close();
 }
 
 // declaration merging

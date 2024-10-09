@@ -158,27 +158,15 @@ const configuration_workflow = (req) =>
             "GoBack",
             ...boolfields.map((f) => `Toggle ${f.name}`),
           ];
-          const actions = [
-            ...builtInActions,
-            ...stateActions.map(([k, v]) => k),
-          ];
-          const triggerActions = [];
-          (
-            await Trigger.find({
-              when_trigger: { or: ["API call", "Never"] },
-              table_id: null,
-            })
-          ).forEach((tr) => {
-            actions.push(tr.name);
-            triggerActions.push(tr.name);
+          const triggerActions = Trigger.trigger_actions({
+            tableTriggers: table.id,
+            apiNeverTriggers: true,
           });
-          (
-            await Trigger.find({
-              table_id: context.table_id,
-            })
-          ).forEach((tr) => {
-            actions.push(tr.name);
-            triggerActions.push(tr.name);
+          const actions = Trigger.action_options({
+            tableTriggers: table.id,
+            apiNeverTriggers: true,
+            builtInLabel: "List Actions",
+            builtIns: builtInActions,
           });
           for (const field of fields) {
             if (field.type === "Key") {
@@ -600,6 +588,10 @@ const configuration_workflow = (req) =>
                 .map((s) => code(s))
                 .join(", "),
             type: "String",
+            help: {
+              topic: "Inclusion Formula",
+              context: { table_name: table.name },
+            },
           });
           formfields.push({
             name: "exclusion_relation",
@@ -626,9 +618,10 @@ const configuration_workflow = (req) =>
           formfields.push({
             name: "_row_click_url_formula",
             label: req.__("Row click URL"),
-            sublabel: req.__(
-              "Formula. Navigate to this URL when row is clicked"
-            ),
+            sublabel:
+              req.__("Formula. Navigate to this URL when row is clicked") +
+              ". " +
+              req.__("Example: <code>`/view/TheOtherView?id=${id}`</code>"),
             type: "String",
             class: "validate-expression",
           });
@@ -686,6 +679,13 @@ const configuration_workflow = (req) =>
             label: req.__("Striped rows"),
             type: "Bool",
             sublabel: req.__("Add zebra stripes to rows"),
+            tab: "Layout options",
+          });
+          formfields.push({
+            name: "_card_rows",
+            label: req.__("Card rows"),
+            type: "Bool",
+            sublabel: req.__("Each row in a card. Not supported by all themes"),
             tab: "Layout options",
           });
           formfields.push({
@@ -1068,6 +1068,9 @@ const run = async (
   if (default_state?._striped_rows) {
     page_opts.class += "table-striped ";
   }
+  if (default_state?._card_rows) {
+    page_opts.class += "table-card-rows ";
+  }
   if (default_state?._borderless) {
     page_opts.class += "table-borderless ";
   }
@@ -1249,7 +1252,27 @@ module.exports = {
    */
   default_state_form: ({ default_state }) => {
     if (!default_state) return default_state;
-    const { _omit_state_form, _create_db_view, ...ds } = default_state;
+    const {
+      _omit_state_form,
+      _create_db_view,
+      _order_field,
+      _descending,
+      include_fml,
+      exclusion_relation,
+      exclusion_where,
+      _rows_per_page,
+      _row_click_url_formula,
+      transpose,
+      transpose_width,
+      transpose_width_units,
+      _omit_header,
+      hide_null_columns,
+      _hover_rows,
+      _striped_rows,
+      _card_rows,
+      _borderless,
+      ...ds
+    } = default_state;
     return ds && removeDefaultColor(removeEmptyStrings(ds));
   },
   /**
@@ -1332,9 +1355,17 @@ module.exports = {
             )
           : {};
         const relRows = await relTable.getRows(relWhere);
-        mergeIntoWhere(where, {
-          id: { not: { in: relRows.map((r) => r[relfld]) } },
-        });
+        if (relRows.length > 0)
+          mergeIntoWhere(
+            where,
+            !db.isSQLite
+              ? {
+                  id: { not: { in: relRows.map((r) => r[relfld]) } },
+                }
+              : {
+                  not: { or: relRows.map((r) => ({ id: r[relfld] })) },
+                }
+          );
       }
       let rows = await table.getJoinedRows({
         where,

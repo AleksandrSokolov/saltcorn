@@ -77,11 +77,9 @@ function loggedIn(req, res, next) {
  * @returns {void}
  */
 function isAdmin(req, res, next) {
-  if (
-    req.user &&
-    req.user.role_id === 1 &&
-    req.user.tenant === db.getTenantSchema()
-  ) {
+  const cur_tenant = db.getTenantSchema();
+  //console.log({ cur_tenant, user: req.user });
+  if (req.user && req.user.role_id === 1 && req.user.tenant === cur_tenant) {
     next();
   } else {
     req.flash("danger", req.__("Must be admin"));
@@ -157,6 +155,8 @@ const get_tenant_from_req = (req, hostPartsOffset) => {
   if (req.subdomains && req.subdomains.length == 0)
     return db.connectObj.default_schema;
   if (!req.subdomains && req.headers.host) {
+    if (is_ip_address(req.headers.host.split(":")[0]))
+      return db.connectObj.default_schema;
     const parts = req.headers.host.split(".");
     if (parts.length < (!hostPartsOffset ? 3 : 3 - hostPartsOffset))
       return db.connectObj.default_schema;
@@ -239,8 +239,14 @@ const setTenant = (req, res, next) => {
       }
     }
   } else {
-    setLanguage(req, res);
-    getState().log(5, `${req.method} ${req.originalUrl}`);
+    const state = getState();
+    setLanguage(req, res, state);
+    state.log(
+      5,
+      `${req.method} ${req.originalUrl}${
+        state.getConfig("log_ip_address", false) ? ` IP=${req.ip}` : ""
+      }`
+    );
     next();
   }
 };
@@ -299,7 +305,7 @@ const getGitRevision = () => db.connectObj.git_commit;
  * Gets session store
  * @returns {session|cookieSession}
  */
-const getSessionStore = () => {
+const getSessionStore = (pruneInterval) => {
   /*if (getState().getConfig("cookie_sessions", false)) {
     return cookieSession({
       keys: [db.connectObj.session_secret || is.str.generate()],
@@ -322,6 +328,7 @@ const getSessionStore = () => {
         schemaName: db.connectObj.default_schema,
         pool: db.pool,
         tableName: "_sc_session",
+        pruneSessionInterval: pruneInterval > 0 ? pruneInterval : false,
       }),
       secret: db.connectObj.session_secret || is.str.generate(),
       resave: false,
@@ -348,6 +355,18 @@ const addOnDoneRedirect = (oldPath, req) => {
 //https://stackoverflow.com/a/38979205/19839414
 const is_relative_url = (url) => {
   return typeof url === "string" && !url.includes(":/") && !url.includes("//");
+};
+
+/**
+ * Check that String is IPv4 address
+ * @param {string} hostname
+ * @returns {boolean|string[]}
+ */
+// TBD not sure that false is correct return if type of is not string
+// TBD Add IPv6 support
+const is_ip_address = (hostname) => {
+  if (typeof hostname !== "string") return false;
+  return hostname.split(".").every((s) => +s >= 0 && +s <= 255);
 };
 
 const admin_config_route = ({
@@ -558,6 +577,7 @@ module.exports = {
   get_tenant_from_req,
   addOnDoneRedirect,
   is_relative_url,
+  is_ip_address,
   get_sys_info,
   admin_config_route,
   sendHtmlFile,

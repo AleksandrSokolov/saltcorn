@@ -84,6 +84,10 @@ const fieldForm = async (req, fkey_opts, existing_names, id, hasData) => {
         sublabel: req.__("Name of the field"),
         type: "String",
         attributes: { autofocus: true },
+        help: {
+          topic: "Field label",
+          context: {},
+        },
         validator(s) {
           if (!s || s === "") return req.__("Missing label");
           if (!id && existing_names.includes(Field.labelToName(s)))
@@ -104,6 +108,10 @@ const fieldForm = async (req, fkey_opts, existing_names, id, hasData) => {
           "The type determines the kind of data that can be stored in the field"
         ),
         input_type: "select",
+        help: {
+          topic: "Field types",
+          context: {},
+        },
         options: isPrimary
           ? primaryTypes
           : getState().type_names.concat(fkey_opts || []),
@@ -911,12 +919,19 @@ router.post(
   "/test-formula",
   isAdmin,
   error_catcher(async (req, res) => {
-    const { formula, tablename, stored } = req.body;
+    let { formula, tablename, stored } = req.body;
+    if (stored === "false") stored = false;
+
     const table = Table.findOne({ name: tablename });
     const fields = table.getFields();
     const freeVars = freeVariables(formula);
     const joinFields = {};
-    if (stored) add_free_variables_to_joinfields(freeVars, joinFields, fields);
+    add_free_variables_to_joinfields(freeVars, joinFields, fields);
+    if (!stored && Object.keys(joinFields).length > 0) {
+      return res
+        .status(400)
+        .send(`Joinfields only permitted in stored calculated fields`);
+    }
     const rows = await table.getJoinedRows({
       joinFields,
       orderBy: "RANDOM()",
@@ -942,9 +957,9 @@ router.post(
       );
     } catch (e) {
       console.error(e);
-      return res.send(
-        `Error on running on row with id=${rows[0].id}: ${e.message}`
-      );
+      return res
+        .status(400)
+        .send(`Error on running on row with id=${rows[0].id}: ${e.message}`);
     }
   })
 );
@@ -1149,7 +1164,7 @@ router.post(
           const jf = table.getField(ref);
           const jtable = Table.findOne(jf.reftable_name);
           const jrow = await jtable.getRow(
-            { [jtable.pk_name]: row[ref] },
+            { [jtable.pk_name]: row[ref]?.[jtable.pk_name] || row[ref] },
             { forUser: req.user, forPublic: !req.user }
           );
           row[ref] = jrow;

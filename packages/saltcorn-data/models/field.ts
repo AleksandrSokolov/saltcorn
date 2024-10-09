@@ -215,6 +215,7 @@ class Field implements AbstractField {
       attributes: this.attributes,
       required: this.required,
       primary_key: this.primary_key,
+      preset_options: this.preset_options,
     };
   }
 
@@ -310,8 +311,14 @@ class Field implements AbstractField {
       where = this.attributes.where
         ? jsexprToWhere(this.attributes.where, extraCtx)
         : undefined;
-    if (this.fieldviewObj?.fill_options) {
-      await this.fieldviewObj.fill_options(
+
+    const fieldviewObj =
+      this.fieldviewObj ||
+      (typeof this.type === "string"
+        ? undefined
+        : this.type?.fieldviews?.[this.fieldview || ""]);
+    if (fieldviewObj?.fill_options) {
+      await fieldviewObj.fill_options(
         this,
         force_allow_none,
         where,
@@ -330,23 +337,18 @@ class Field implements AbstractField {
       formFieldNames!.forEach((nm) => {
         fakeEnv[nm] = "$" + nm;
       });
-      const whereWithExisting = existingValue
-        ? {
-            or: [
-              { id: existingValue },
-              jsexprToWhere(this.attributes.where, fakeEnv),
-            ],
-          } //TODO pk_name
-        : jsexprToWhere(this.attributes.where, fakeEnv);
+
       this.attributes.dynamic_where = {
         table: this.reftable_name,
         refname: this.refname,
         where: this.attributes.where,
-        whereParsed: whereWithExisting,
+        whereParsed: jsexprToWhere(this.attributes.where, fakeEnv),
+        existingValue,
         summary_field: this.attributes.summary_field,
         label_formula: this.attributes.label_formula,
         neutral_label: this.attributes.neutral_label,
-        required: this.required,
+        required: this.required || this.attributes.force_required,
+        placeholder: this.attributes.placeholder,
       };
     }
     //console.log({ where, isDynamic, awhere: this.attributes.where });
@@ -954,7 +956,8 @@ class Field implements AbstractField {
 
     await db.deleteWhere("_sc_fields", { id: this.id }, { client });
 
-    if (!db.isSQLite && (!this.calculated || this.stored)) {
+    if (!this.calculated || this.stored) {
+      if (db.isSQLite && this.is_unique) await this.remove_unique_constraint();
       await client.query(
         `alter table ${schema}"${sqlsanitize(
           table.name

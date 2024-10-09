@@ -14,6 +14,9 @@ import { JoinFields, Row, Where } from "@saltcorn/db-common/internal";
 import Field from "./field";
 import { PluginFunction } from "@saltcorn/types/base_types";
 import db from "../db";
+import utils from "../utils";
+const { mergeIntoWhere } = utils;
+
 /**
  * @param {string} s
  * @returns {boolean|void}
@@ -103,6 +106,7 @@ function jsexprToSQL(expression: string, extraCtx: any = {}): String {
           return `${value}`;
         },
       })[node.type](node);
+    // @ts-ignore
     return compile(ast);
   } catch (e: any) {
     console.error(e);
@@ -340,7 +344,8 @@ function jsexprToWhere(
             "&&"({ left, right }: { left: ExtendedNode; right: ExtendedNode }) {
               const l = compile(left);
               const r = compile(right);
-              Object.assign(l, r);
+              //Object.assign(l, r);
+              mergeIntoWhere(l, r);
               return l;
             },
             "||"({ left, right }: { left: any; right: any }) {
@@ -359,6 +364,7 @@ function jsexprToWhere(
           return value;
         },
       })[node.type](node);
+    // @ts-ignore
     return compile(ast);
   } catch (e: any) {
     console.error(e);
@@ -379,15 +385,37 @@ function freeVariablesInInterpolation(interpString: string): Set<string> {
 
 function freeVariables(expression: string): Set<string> {
   if (!expression) return new Set();
-  const freeVars: string[] = [];
   const ast: any = parseExpressionAt(expression, 0, {
     ecmaVersion: 2020,
     allowAwaitOutsideFunction: true,
     locations: false,
   });
+  return new Set(freeVariablesAST(ast));
+}
+function freeVariablesAST(ast: any): Array<string> {
+  const freeVars: string[] = [];
   //console.log(JSON.stringify(ast, null, 2));
 
+  //const fvsAtCall: any = {};
   traverse(ast, {
+    enter: function (node) {
+      if (node.type === "CallExpression") {
+        // the rule here is: if the callee of a CallExpression is a member, the
+        // last member get removed.
+        const calleeFvs = freeVariablesAST(node.callee);
+        const argFvs = node.arguments.map(freeVariablesAST).flat();
+        if (calleeFvs.length === 1) {
+          const parts = calleeFvs[0].split(".");
+          if (parts.length > 1) {
+            parts.pop();
+            calleeFvs[0] = parts.join(".");
+          }
+        }
+        freeVars.push(...calleeFvs.filter(Boolean));
+        freeVars.push(...argFvs);
+        return this.skip();
+      }
+    },
     leave: function (node) {
       //console.log(node);
 
@@ -396,6 +424,11 @@ function freeVariables(expression: string): Set<string> {
       }
       if (node.type === "MemberExpression") {
         if (
+          node.property.type === "Identifier" &&
+          node.property.name === "length"
+        ) {
+          freeVars.pop();
+        } else if (
           node.object.type === "Identifier" &&
           node.property.type === "Identifier"
         ) {
@@ -408,7 +441,7 @@ function freeVariables(expression: string): Set<string> {
           node.object.property.type === "Identifier" &&
           node.property.type === "Identifier"
         ) {
-          freeVars.pop();
+          //freeVars.pop();
           freeVars.pop();
           freeVars.pop();
           freeVars.push(
@@ -422,8 +455,8 @@ function freeVariables(expression: string): Set<string> {
           node.object.property.type === "Identifier" &&
           node.property.type === "Identifier"
         ) {
-          freeVars.pop();
-          freeVars.pop();
+          //freeVars.pop();
+          //freeVars.pop();
           freeVars.pop();
           freeVars.pop();
           freeVars.push(
@@ -435,7 +468,7 @@ function freeVariables(expression: string): Set<string> {
   });
   //console.log(expression, freeVars);
 
-  return new Set(freeVars);
+  return freeVars;
 }
 
 /**
@@ -663,15 +696,23 @@ const apply_calculated_fields_stored = async (
     ) {
       hasExprs = true;
       // refetch row with agg
+      const _agg_val: any = {
+        ...field.attributes,
+        where: jsexprToWhere(field.attributes.aggwhere),
+        field: field.attributes.agg_field.split("@")[0],
+        orderBy: field.attributes.agg_order_by,
+      };
+      if (_agg_val.table?.includes?.("->")) {
+        const [ttable, dtable] = _agg_val.table.split("->");
+        const [through, rest] = _agg_val.agg_relation.split("->");
+        _agg_val.table = dtable;
+        _agg_val.through = through;
+      }
+
       const reFetchedRow = await table.getJoinedRow({
         where: { [table.pk_name]: row[table.pk_name] },
         aggregations: {
-          _agg_val: {
-            ...field.attributes,
-            where: jsexprToWhere(field.attributes.aggwhere),
-            field: field.attributes.agg_field.split("@")[0],
-            orderBy: field.attributes.agg_order_by,
-          },
+          _agg_val,
         },
       });
 

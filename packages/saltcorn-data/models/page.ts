@@ -44,11 +44,12 @@ const {
   InvalidConfiguration,
   satisfies,
   structuredClone,
-  isNode,
+  isWeb,
   objectToQueryString,
   stringToJSON,
   dollarizeObject,
   getSessionId,
+  cloneName,
 } = utils;
 import { AbstractTag } from "@saltcorn/types/model-abstracts/abstract_tag";
 
@@ -206,13 +207,12 @@ class Page implements AbstractPage {
    * @returns {Promise<Page>}
    */
   async clone(): Promise<Page> {
-    const basename = this.name + " copy";
-    let newname;
-    for (let i = 0; i < 100; i++) {
-      newname = i ? `${basename} (${i})` : basename;
-      const existing = Page.findOne({ name: newname });
-      if (!existing) break;
-    }
+    const existingNames = await Page.find({ name: { ilike: this.name } });
+    const newname = cloneName(
+      this.name,
+      existingNames.map((v) => v.name)
+    );
+
     const createObj = {
       ...this,
       name: newname,
@@ -351,9 +351,11 @@ class Page implements AbstractPage {
         }
         const url =
           segment.action_name === "GoBack"
-            ? `javascript:${isNode() ? "history.back()" : "parent.goBack()"}`
+            ? `javascript:${
+                isWeb(extraArgs.req) ? "history.back()" : "parent.goBack()"
+              }`
             : `javascript:${
-                isNode() ? "ajax_post_json" : "local_post_json"
+                isWeb(extraArgs.req) ? "ajax_post_json" : "local_post_json"
               }('/page/${pagename}/action/${segment.rndid}')`;
         const html = action_link(url, extraArgs.req, segment);
         segment.type = "blank";

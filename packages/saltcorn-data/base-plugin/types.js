@@ -24,6 +24,7 @@ const {
   text_attr,
   label,
   script,
+  optgroup,
   domReady,
   section,
   pre,
@@ -37,6 +38,7 @@ const { getState } = require("../db/state");
 const { localeDate, localeDateTime } = require("@saltcorn/markup");
 const { freeVariables, eval_expression } = require("../models/expression");
 const Table = require("../models/table");
+const User = require("../models/user");
 const _ = require("underscore");
 const { interpolate } = require("../utils");
 const { sqlFun, sqlBinOp } = require("@saltcorn/db-common/internal");
@@ -44,6 +46,8 @@ const { sqlFun, sqlBinOp } = require("@saltcorn/db-common/internal");
 const isdef = (x) => (typeof x === "undefined" || x === null ? false : true);
 
 const eqStr = (x, y) => `${x}` === `${y}`;
+
+const or_if_undefined = (x, def) => (typeof x === "undefined" ? def : x);
 
 const number_slider = (type) => ({
   configFields: (field) => [
@@ -279,7 +283,9 @@ const show_with_html = {
   isEdit: false,
   description: "Show value with any HTML code",
   run: (v, req, attrs = {}) => {
-    const rendered = interpolate(attrs?.code, { it: v }, req?.user);
+    const ctx = { ...getState().eval_context };
+    ctx.it = v;
+    const rendered = interpolate(attrs?.code, ctx, req?.user);
     return rendered;
   },
 };
@@ -361,6 +367,38 @@ const heat_cell = (type) => ({
       RedAmberGreen: `hsl(${100 * pcnt},100%, 50%)`,
       WhiteToRed: `hsl(0,100%, ${100 * (1 - pcnt / 2)}%)`,
     }[attrs.color_scale];
+
+    function getLuminance(hexColor) {
+      const r = parseInt(hexColor.substr(1, 2), 16) / 255;
+      const g = parseInt(hexColor.substr(3, 2), 16) / 255;
+      const b = parseInt(hexColor.substr(5, 2), 16) / 255;
+
+      const a = [r, g, b].map((v) => {
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      });
+
+      return a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722;
+    }
+
+    function hslToHex(h, s, l) {
+      l /= 100;
+      const a = (s * Math.min(l, 1 - l)) / 100;
+      const f = (n) => {
+        const k = (n + h / 30) % 12;
+        const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+        return Math.round(255 * color)
+          .toString(16)
+          .padStart(2, "0"); // convert to Hex and prefix "0" if needed
+      };
+      return `#${f(0)}${f(8)}${f(4)}`;
+    }
+
+    const [h, s, l] = backgroundColor.match(/\d+/g).map(Number);
+    const hexColor = hslToHex(h, s, l);
+    const luminance = getLuminance(hexColor);
+
+    const textColor = luminance > 0.5 ? "#000000" : "#FFFFFF";
+
     return div(
       {
         class: "px-2",
@@ -368,6 +406,7 @@ const heat_cell = (type) => ({
           width: "100%",
           height: `${attrs.em_height || 1}em`,
           backgroundColor,
+          color: textColor,
         },
       },
       text(v)
@@ -478,11 +517,20 @@ const number_stepper = (name, v, attrs, cls, fieldname, id) =>
  * @param {string} optsStr
  * @returns {string[]}
  */
-const getStrOptions = (v, optsStr) =>
-  typeof optsStr === "string"
+const getStrOptions = (v, optsStr, exclude_values_string) => {
+  const exclude_values = exclude_values_string
+    ? new Set(
+        exclude_values_string
+          .split(",")
+          .map((o) => o.trim())
+          .filter(Boolean)
+      )
+    : new Set([]);
+  return typeof optsStr === "string"
     ? optsStr
         .split(",")
         .map((o) => o.trim())
+        .filter((o) => eqStr(v, o) || !exclude_values.has(o))
         .map((o) =>
           option(
             { value: text_attr(o), ...(eqStr(v, o) && { selected: true }) },
@@ -490,7 +538,20 @@ const getStrOptions = (v, optsStr) =>
           )
         )
     : optsStr.map((o, ix) =>
-        o && typeof o.name !== "undefined" && typeof o.label !== "undefined"
+        o?.optgroup
+          ? optgroup(
+              { label: o.label },
+              o.options.map((oi) =>
+                option(
+                  {
+                    selected: v == or_if_undefined(oi.value, oi),
+                    value: or_if_undefined(oi.value, oi),
+                  },
+                  or_if_undefined(oi.label, oi)
+                )
+              )
+            )
+          : o && typeof o.name !== "undefined" && typeof o.label !== "undefined"
           ? option(
               {
                 value: o.name,
@@ -504,10 +565,153 @@ const getStrOptions = (v, optsStr) =>
             )
           : option({ value: o, ...(eqStr(v, o) && { selected: true }) }, o)
       );
-
+};
 const join_fields_in_formula = (fml) => {
   if (!fml) return [];
   return [...freeVariables(fml)];
+};
+
+const to_locale_string = {
+  description: "Show as in locale-sensitive representation",
+  configFields: (field) => [
+    {
+      type: "String",
+      name: "locale",
+      label: "Locale",
+      sublabel: "Blank for default user locale",
+    },
+    {
+      type: "String",
+      name: "style",
+      label: "Style",
+      required: true,
+      attributes: {
+        options: ["decimal", "currency", "percent", "unit"],
+      },
+    },
+    {
+      type: "Integer",
+      name: "maximumFractionDigits",
+      label: "Max Fraction Digits",
+      attributes: {
+        min: 0,
+      },
+    },
+    {
+      type: "Integer",
+      name: "maximumSignificantDigits",
+      label: "Max Significant Digits",
+      attributes: {
+        min: 0,
+      },
+    },
+    {
+      type: "String",
+      name: "currency",
+      label: "Currency",
+      sublabel: "ISO 4217. Example: USD or EUR",
+      required: true,
+      showIf: { style: "currency" },
+    },
+    {
+      type: "String",
+      name: "currencyDisplay",
+      label: "Currency display",
+      required: true,
+      showIf: { style: "currency" },
+      attributes: {
+        options: ["symbol", "code", "narrrowSymbol", "name"],
+      },
+    },
+    {
+      type: "String",
+      name: "unit",
+      label: "Unit",
+      required: true,
+      showIf: { style: "unit" },
+      attributes: {
+        options: [
+          "acre",
+          "bit",
+          "byte",
+          "celsius",
+          "centimeter",
+          "day",
+          "degree",
+          "fahrenheit",
+          "fluid-ounce",
+          "foot",
+          "gallon",
+          "gigabit",
+          "gigabyte",
+          "gram",
+          "hectare",
+          "hour",
+          "inch",
+          "kilobit",
+          "kilobyte",
+          "kilogram",
+          "kilometer",
+          "liter",
+          "megabit",
+          "megabyte",
+          "meter",
+          "microsecond",
+          "mile",
+          "mile-scandinavian",
+          "milliliter",
+          "millimeter",
+          "millisecond",
+          "minute",
+          "month",
+          "nanosecond",
+          "ounce",
+          "percent",
+          "petabyte",
+          "pound",
+          "second",
+          "stone",
+          "terabit",
+          "terabyte",
+          "week",
+          "yard",
+          "year",
+        ],
+      },
+    },
+    {
+      type: "String",
+      name: "unitDisplay",
+      label: "Unit display",
+      required: true,
+      showIf: { style: "unit" },
+      attributes: {
+        options: ["short", "narrow", "long"],
+      },
+    },
+  ],
+  isEdit: false,
+  run: (v, req, attrs = {}) => {
+    const v1 = typeof v === "string" ? +v : v;
+    if (typeof v1 === "number") {
+      const locale_ = attrs.locale || locale(req);
+      return v1.toLocaleString(locale_, {
+        style: attrs.style,
+        currency: attrs.currency,
+        currencyDisplay: attrs.currencyDisplay,
+        unit: attrs.unit,
+        unitDisplay: attrs.unitDisplay,
+        maximumSignificantDigits:
+          attrs.maximumSignificantDigits === 0
+            ? 0
+            : attrs.maximumSignificantDigits || undefined,
+        maximumFractionDigits:
+          attrs.maximumFractionDigits == 0
+            ? 0
+            : attrs.maximumFractionDigits || undefined,
+      });
+    } else return "";
+  },
 };
 
 /**
@@ -519,6 +723,7 @@ const join_fields_in_formula = (fml) => {
 const string = {
   /** @type {string} */
   name: "String",
+  description: "A sequence of unicode characters of any length.",
   /** @type {string} */
   sql_name: "text",
   js_type: "string",
@@ -643,6 +848,66 @@ const string = {
       description: "Show as a code block",
       run: (s) => (s ? pre(code(text_attr(s || ""))) : ""),
     },
+    monospace_block: {
+      isEdit: false,
+      configFields: [
+        {
+          name: "max_init_height",
+          label: "Max initial rows",
+          sublabel: "Only show this many rows until the user clicks",
+          type: "Integer",
+        },
+        { name: "copy_btn", label: "Copy button", type: "Bool" },
+      ],
+      description: "Show as a monospace block",
+      run: (s, req, attrs = {}) => {
+        if (!s) return "";
+        const copy_btn = attrs.copy_btn
+          ? button(
+              {
+                class:
+                  "btn btn-secondary btn-sm monospace-copy-btn m-1 d-none-prefer",
+                type: "button",
+                onclick: "copy_monospace_block(this)",
+              },
+              i({ class: "fas fa-copy" })
+            )
+          : "";
+        if (!attrs.max_init_height)
+          return (
+            copy_btn +
+            pre(
+              {
+                class: "monospace-block",
+              },
+              s
+            )
+          );
+        const lines = s.split("\n");
+
+        if (lines.length <= attrs.max_init_height)
+          return (
+            copy_btn +
+            pre(
+              {
+                class: "monospace-block",
+              },
+              s
+            )
+          );
+        return (
+          copy_btn +
+          pre(
+            {
+              class: "monospace-block",
+              onclick: `monospace_block_click(this)`,
+            },
+            lines.slice(0, attrs.max_init_height).join("\n") + "\n..."
+          ) +
+          pre({ class: "d-none" }, s)
+        );
+      },
+    },
     ellipsize: {
       isEdit: false,
       configFields: [
@@ -733,6 +998,17 @@ const string = {
               },
             ]
           : []),
+        ...(field.attributes.options && field.attributes.options.length > 0
+          ? [
+              {
+                name: "exclude_values",
+                label: "Exclude values",
+                sublabel:
+                  "Comma-separated list of value to exclude from the dropdown select",
+                type: "String",
+              },
+            ]
+          : []),
         {
           name: "placeholder",
           label: "Placeholder",
@@ -792,13 +1068,13 @@ const string = {
                         { value: "", disabled: true, selected: !v },
                         attrs.placeholder
                       ),
-                      ...getStrOptions(v, attrs.options),
+                      ...getStrOptions(v, attrs.options, attrs.exclude_values),
                     ]
                   : required || attrs.force_required
-                  ? getStrOptions(v, attrs.options)
+                  ? getStrOptions(v, attrs.options, attrs.exclude_values)
                   : [
                       option({ value: "" }, attrs.neutral_label || ""),
-                      ...getStrOptions(v, attrs.options),
+                      ...getStrOptions(v, attrs.options, attrs.exclude_values),
                     ]
               )
           : attrs.options
@@ -1248,6 +1524,7 @@ const is_valid_regexp = (s) => {
 const int = {
   /** @type {string} */
   name: "Integer",
+  description: "Whole numbers, positive and negative.",
   /** @type {string} */
   sql_name: "int",
   js_type: "number",
@@ -1394,6 +1671,39 @@ const int = {
         );
       },
     },
+    to_locale_string,
+    role_select: {
+      isEdit: true,
+      blockDisplay: true,
+      description: "Select a user role",
+      fill_options: async (field) => {
+        const roles = await User.get_roles();
+        field.options = roles;
+      },
+      run: (nm, v, attrs, cls, required, field) => {
+        return select(
+          {
+            class: [
+              "form-control",
+              "form-select",
+              cls,
+              attrs.selectizable ? "selectizable" : false,
+            ],
+            name: text_attr(nm),
+            "data-fieldname": text_attr(field.name),
+            id: `input${text_attr(nm)}`,
+            disabled: attrs.disabled,
+            onChange: attrs.onChange,
+            onBlur: attrs.onChange,
+            autocomplete: "off",
+            required: true,
+          },
+          field.options.map(({ id, role }) =>
+            option({ value: id, selected: v == id }, role)
+          )
+        );
+      },
+    },
   },
   /** @type {object[]}  */
   attributes: [
@@ -1444,6 +1754,7 @@ const int = {
 const color = {
   /** @type {string} */
   name: "Color",
+  description: "Colors, defined as Red, Green and Blue with 256 level each",
   /** @type {string} */
   sql_name: "text",
   js_type: "string",
@@ -1529,6 +1840,7 @@ const color = {
 const float = {
   /** @type {string} */
   name: "Float",
+  description: "Floating-point numbers",
   /** @type {string} */
   sql_name: "double precision",
   js_type: "number",
@@ -1603,6 +1915,7 @@ const float = {
     heat_cell: heat_cell("Float"),
     above_input: float_number_limit("gte"),
     below_input: float_number_limit("lte"),
+    to_locale_string,
     show_with_html,
   },
   /** @type {object[]} */
@@ -1669,6 +1982,7 @@ const logit = (x) => {
 const date = {
   /** @type {string} */
   name: "Date",
+  description: "Dates, with or without time",
   /** @type {string} */
   sql_name: "timestamptz",
   js_type: "Date",
@@ -1738,7 +2052,9 @@ const date = {
           name: "format",
           label: "Format",
           type: "String",
-          sublabel: "moment.js format specifier",
+          help: {
+            topic: "Date format",
+          },
         },
       ],
       run: (d, req, options) => {
@@ -1862,7 +2178,7 @@ const date = {
    */
   read: (v, attrs) => {
     if (v instanceof Date && !isNaN(v)) return v;
-    if (typeof v === "string") {
+    if (typeof v === "string" || (typeof v === "number" && !isNaN(v))) {
       if (attrs && attrs.locale) {
         const d = moment(v, "L LT", attrs.locale).toDate();
         if (d instanceof Date && !isNaN(d)) return d;
@@ -1888,6 +2204,7 @@ const date = {
 const bool = {
   /** @type {string} */
   name: "Bool",
+  description: "Boolean values: true or false",
   /** @type {string} */
   sql_name: "boolean",
   js_type: "boolean",

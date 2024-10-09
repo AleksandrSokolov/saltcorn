@@ -44,7 +44,7 @@ const {
 const db = require("@saltcorn/data/db");
 
 const { loadAllPlugins, loadAndSaveNewPlugin } = require("../load_plugins");
-const { isAdmin, error_catcher } = require("./utils.js");
+const { isAdmin, error_catcher, is_ip_address } = require("./utils.js");
 const User = require("@saltcorn/data/models/user");
 const File = require("@saltcorn/data/models/file");
 const {
@@ -117,22 +117,10 @@ const create_tenant_allowed = (req) => {
   return user_role <= required_role;
 };
 
-/**
- * Check that String is IPv4 address
- * @param {string} hostname
- * @returns {boolean|string[]}
- */
-// TBD not sure that false is correct return if type of is not string
-// TBD Add IPv6 support
-const is_ip_address = (hostname) => {
-  if (typeof hostname !== "string") return false;
-  return hostname.split(".").every((s) => +s >= 0 && +s <= 255);
-};
-
 const get_cfg_tenant_base_url = (req) =>
   remove_leading_chars(
     ".",
-    getRootState().getConfig("tenant_baseurl", req.hostname)
+    getRootState().getConfig("tenant_baseurl", req.hostname) || req.hostname
   )
     .replace("http://", "")
     .replace("https://", "");
@@ -268,7 +256,8 @@ router.post(
       return;
     }
     // declare  ui form
-    const form = tenant_form(req);
+    const base_url = get_cfg_tenant_base_url(req);
+    const form = tenant_form(req, base_url);
     // validate ui form
     const valres = form.validate(req.body);
     if (valres.errors)

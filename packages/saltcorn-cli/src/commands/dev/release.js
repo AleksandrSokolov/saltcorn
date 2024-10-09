@@ -2,7 +2,7 @@
  * @category saltcorn-cli
  * @module commands/release
  */
-const { Command, flags } = require("@oclif/command");
+const { Command, Flags, Args } = require("@oclif/core");
 const fs = require("fs");
 const { spawnSync } = require("child_process");
 const { sleep } = require("../../common");
@@ -20,7 +20,7 @@ class ReleaseCommand extends Command {
     const {
       args: { version },
       flags,
-    } = this.parse(ReleaseCommand);
+    } = await this.parse(ReleaseCommand);
     spawnSync("git", ["pull"], {
       stdio: "inherit",
       cwd: ".",
@@ -125,8 +125,12 @@ class ReleaseCommand extends Command {
     });
     for (const p of Object.values(pkgs)) {
       updatePkgJson(p.dir);
-      if (p.publish) publish(p.dir);
+      if (p.publish) {
+        publish(p.dir);
+        await sleep(3000);
+      }
     }
+    await sleep(5000);
 
     // for cli:
     // 1. update version
@@ -142,10 +146,12 @@ class ReleaseCommand extends Command {
       stdio: "inherit",
       cwd: `packages/saltcorn-cli/`,
     });
-    spawnSync("npm", ["audit", "fix"], {
-      stdio: "inherit",
-      cwd: `packages/saltcorn-cli/`,
-    });
+    // do not run 'audit fix' on full point releases, only on -beta.x, -rc.x etc
+    if (version.includes("-"))
+      spawnSync("npm", ["audit", "fix"], {
+        stdio: "inherit",
+        cwd: `packages/saltcorn-cli/`,
+      });
     publish("saltcorn-cli");
     fs.writeFileSync(`package.json`, JSON.stringify(rootPackageJson, null, 2));
     // update Dockerfile
@@ -190,12 +196,15 @@ ReleaseCommand.description = `Release a new saltcorn version`;
 /**
  * @type {object}
  */
-ReleaseCommand.args = [
-  { name: "version", required: true, description: "New version number" },
-];
+ReleaseCommand.args = {
+  version: Args.string({
+    required: true,
+    description: "New version number",
+  }),
+};
 
 ReleaseCommand.flags = {
-  tag: flags.string({
+  tag: Flags.string({
     char: "t",
     description: "NPM tag",
   }),
