@@ -1171,10 +1171,10 @@
 	"Daily": "Ежедневно",
 	"Weekly": "Еженедельно",
 	"Events and Trigger settings": "События и Триггеры (настройки)",
-	"Configure action": "Configure action",
+	"Configure action": "Настройть действие",
 	"Log IP address": "Log IP address",
-	"Record the request IP address in log messages": "Record the request IP address in log messages",
-	"Runtime informations": "Runtime informations",
-	"open logs viewer": "open logs viewer",
+	"Record the request IP address in log messages": "Записывать IP в сообщения логирования",
+	"Runtime informations": "Runtime информация",
+	"open logs viewer": "Посмотреть логи",
 	"Constants and function code": "Constants and function code"
 }
