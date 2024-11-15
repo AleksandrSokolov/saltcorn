@@ -26,15 +26,30 @@ const readPackageJson = async (filePath) => {
   else return null;
 };
 
-const npmInstallNeeded = (oldPckJSON, newPckJSON) => {
-  const oldDeps = oldPckJSON.dependencies || Object.create(null);
-  const oldDevDeps = oldPckJSON.devDependencies || Object.create(null);
-  const newDeps = newPckJSON.dependencies || Object.create(null);
-  const newDevDeps = newPckJSON.devDependencies || Object.create(null);
-  return (
-    JSON.stringify(oldDeps) !== JSON.stringify(newDeps) ||
-    JSON.stringify(oldDevDeps) !== JSON.stringify(newDevDeps)
-  );
+/**
+ * install when the new package.json has different dependencies
+ * or when the source is local and there are any dependencies
+ * @param source
+ * @param oldPckJSON
+ * @param newPckJSON
+ * @returns
+ */
+const npmInstallNeeded = (source, oldPckJSON, newPckJSON) => {
+  if (source === "local") {
+    return (
+      Object.keys(newPckJSON.dependencies || {}).length > 0 ||
+      Object.keys(newPckJSON.devDependencies || {}).length > 0
+    );
+  } else {
+    const oldDeps = oldPckJSON.dependencies || Object.create(null);
+    const oldDevDeps = oldPckJSON.devDependencies || Object.create(null);
+    const newDeps = newPckJSON.dependencies || Object.create(null);
+    const newDevDeps = newPckJSON.devDependencies || Object.create(null);
+    return (
+      JSON.stringify(oldDeps) !== JSON.stringify(newDeps) ||
+      JSON.stringify(oldDevDeps) !== JSON.stringify(newDevDeps)
+    );
+  }
 };
 
 class PluginInstaller {
@@ -94,7 +109,11 @@ class PluginInstaller {
         );
         if (
           !pckJSON ||
-          npmInstallNeeded(await this.removeDependencies(pckJSON), tmpPckJSON)
+          npmInstallNeeded(
+            this.plugin.source,
+            await this.removeDependencies(pckJSON),
+            tmpPckJSON
+          )
         )
           await this.npmInstall(tmpPckJSON);
         await this.movePlugin();
@@ -167,6 +186,9 @@ class PluginInstaller {
       case "local":
         if (force || !folderExists) {
           await copy(this.plugin.location, this.tempDir);
+          // if tempdir has a node_modules folder, remove it
+          if (await pathExists(join(this.tempDir, "node_modules")))
+            await rm(join(this.tempDir, "node_modules"), { recursive: true });
           wasLoaded = true;
         }
         break;
@@ -250,22 +272,31 @@ class PluginInstaller {
   }
 
   async npmInstall(pckJSON) {
-    getState().log(5, `NPM install plugin: ${pckJSON.name}`);
     const isWindows = process.platform === "win32";
     if (
       Object.keys(pckJSON.dependencies || {}).length > 0 ||
       Object.keys(pckJSON.devDependencies || {}).length > 0
     ) {
+      getState().log(5, `NPM install plugin: ${pckJSON.name}`);
       const child = spawn("npm", ["install"], {
         cwd: this.tempDir,
         env: { ...process.env, ...this.envVars },
         ...(isWindows ? { shell: true } : {}),
       });
       return new Promise((resolve, reject) => {
+        if (child.stdout) {
+          child.stdout.on("data", (data) => {
+            getState().log(5, data.toString());
+          });
+        }
+        if (child.stderr) {
+          child.stderr.on("data", (data) => {
+            getState().log(5, data.toString());
+          });
+        }
         child.on("exit", (exitCode, signal) => {
           resolve({ success: exitCode === 0 });
         });
-
         child.on("error", (msg) => {
           reject(msg);
         });
