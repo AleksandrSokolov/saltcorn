@@ -242,8 +242,8 @@
 	"Role required to access page": "Роль, которая требуется для доступа к странице",
 	"Page attributes": "Атрибуты страницы",
 	"Page configuration": "Настройки страницы",
-	"Fixed state for %s view": "Фиксированное состояние для вида %s ",
-	"Set fixed states for views": "Установите фиксированные состояния для видов",
+	"Fixed state for %s view": "Фиксированное состояние для Вида %s ",
+	"Set fixed states for views": "Установите фиксированные состояния для Видов",
 	"Page %s saved": "Страница %s сохранена",
 	"Your pages": "Ваши страницы",
 	"Add page": "Создать страницу",
@@ -1219,5 +1219,6 @@
 	"innerHeight": "внутренняя высота",
 	"Cancel": "Отмена",
 	"Add %s to tag %s": "Добавить %s в тег %s",
-	"Add entries to tag %s": "Добавить элементы к тегу %s"
+	"Add entries to tag %s": "Добавить элементы к тегу %s",
+	"Module %s removed.": "Module %s removed."
 }
