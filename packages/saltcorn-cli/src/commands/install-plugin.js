@@ -63,7 +63,7 @@ class InstallPluginCommand extends Command {
             name: pkg.name,
             source: "local",
             location: path.resolve(flags.directory),
-            //unsafe: flags.unsafe? True: undefined
+            //unsafe: false//unsafe: flags.unsafe? True: undefined
           });
           await load_plugins.loadAndSaveNewPlugin(plugin);
         } catch (e) {

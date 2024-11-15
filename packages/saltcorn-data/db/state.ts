@@ -283,7 +283,12 @@ class State {
 
   /**
    * Logging 
-   *
+   * 1 - FATAL
+   * 2 - ERROR
+   * 3 - WARN
+   * 4 - INFO
+   * 5 - DEBUG
+  
    * @param min_level
    * @param msg
    */
@@ -323,7 +328,7 @@ class State {
    * @param msg
    * @param e
    */
-  logIfo(msg: string, e?: Error) {
+  logInfo(msg: string, e?: Error) {
     this._log(4, msg, e);
   }
   /**
