@@ -77,7 +77,7 @@ const noCsrfLookup = (state) => {
   if (!state.plugin_routes) return null;
   else {
     const result = new Set();
-    for (const [plugin, routes] of Object.entries(state.plugin_routes)) {
+    for (const routes of Object.values(state.plugin_routes)) {
       for (const url of routes
         .filter((r) => r.noCsrf === true)
         .map((r) => r.url)) {
@@ -90,7 +90,7 @@ const noCsrfLookup = (state) => {
 
 const prepPluginRouter = (pluginRoutes) => {
   const router = express.Router();
-  for (const [plugin, routes] of Object.entries(pluginRoutes)) {
+  for (const routes of Object.values(pluginRoutes)) {
     for (const route of routes) {
       switch (route.method) {
         case "post":
@@ -136,17 +136,31 @@ const getApp = async (opts = {}) => {
   );
 
   const helmetOptions = {
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        "script-src-attr": ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        styleSrc: ["'self'", "https://fonts.googleapis.com", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:"],
+        fontSrc: ["'self'", "data:"],
+        "form-action": ["'self'"],
+      },
+    },
     referrerPolicy: {
       policy: ["same-origin"],
     },
   };
+  if (
+    getState().getConfig("content_security_policy", "Disabled") === "Disabled"
+  )
+    helmetOptions.contentSecurityPolicy = false;
 
   if (cross_domain_iframe) helmetOptions.xFrameOptions = false;
   app.use(helmet(helmetOptions));
 
   // TODO ch find a better solution
-  app.use(cors());
+  if (getState().getConfig("cors_enabled", true)) app.use(cors());
   const bodyLimit = getState().getConfig("body_limit");
   app.use(
     express.json({
@@ -374,7 +388,9 @@ const getApp = async (opts = {}) => {
             req.url === "/auth/login-with/jwt" ||
             req.url === "/auth/signup")) ||
         jwt_extractor(req) ||
-        req.url === "/auth/callback/saml"
+        req.url === "/auth/callback/saml" ||
+        req.url.startsWith("/notifications/share-handler") ||
+        req.url.startsWith("/notifications/manifest")
       )
         return disabledCsurf(req, res, next);
       csurf(req, res, next);
