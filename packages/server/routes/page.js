@@ -66,6 +66,7 @@ const runPage = async (page, req, res, tic) => {
           description: page.description,
           bodyClass: "page_" + db.sqlsanitize(page.name),
           no_menu: page.attributes?.no_menu,
+          requestFluidLayout: page.attributes?.request_fluid_layout,
         } || `${page.name} page`,
         add_edit_bar({
           role,
@@ -200,6 +201,7 @@ router.post(
           });
           res.json({ success: "ok", ...(result || {}) });
         } catch (e) {
+          getState().log(2, e?.stack)
           res.status(400).json({ error: e.message || e });
         }
       } else res.status(404).json({ error: "Action not found" });
